@@ -123,8 +123,8 @@ object FusClient {
                 headers {
                     append("Authorization", authV)
                     append("User-Agent", "SMART 2.0")
-                    append("Cookie", "JSESSIONID=${sessionId}")
-                    append("Set-Cookie", "JSESSIONID=${sessionId}")
+                    append("Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
+                    append("Set-Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
@@ -159,12 +159,16 @@ object FusClient {
 
         if (response.headers["Set-Cookie"] != null || response.headers["set-cookie"] != null) {
             sessionId = response.headers.entries()
-                .find { it.value.any { value -> value.contains("JSESSIONID=") } }
-                ?.value?.find {
-                    it.contains("JSESSIONID=")
+                .firstNotNullOfOrNull { headers ->
+                    headers.value.find { value ->
+                        value.contains("JSESSIONID=") ||
+                                value.contains("SESSION=")
+                    }
                 }
                 ?.replace("JSESSIONID=", "")
-                ?.replace(Regex(";.*$"), "") ?: sessionId
+                ?.replace("SESSION=", "")
+                ?.replace(Regex(";.*$"), "")
+                ?: sessionId
         }
 
         return body

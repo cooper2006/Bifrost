@@ -17,11 +17,6 @@ version = rootProject.extra["versionName"].toString()
 val javaVersionEnum: JavaVersion by rootProject.extra
 
 kotlin {
-    jvmToolchain {
-        this.languageVersion.set(JavaLanguageVersion.of(javaVersionEnum.toString().toInt()))
-        this.vendor.set(JvmVendorSpec.MICROSOFT)
-    }
-
     jvm {
         compilations.all {
             compileTaskProvider.configure {
@@ -79,6 +74,7 @@ compose.desktop {
             modules("jdk.crypto.ec")
             modules("java.management")
             modules("jdk.accessibility")
+            modules("java.sql")
 
             this.packageName = packageName
 

@@ -152,6 +152,20 @@ internal fun DownloadView() {
                         parentSize = constraints.maxWidth,
                     )
 
+                    Spacer(Modifier.width(8.dp))
+
+                    val isPaused by model.isPaused.collectAsState(false)
+                    HybridButton(
+                        onClick = {
+                            model.isPaused.value = !model.isPaused.value
+                        },
+                        enabled = hasRunningJobs,
+                        text = if (isPaused) stringResource(MR.strings.resume) else stringResource(MR.strings.pause),
+                        description = if (isPaused) stringResource(MR.strings.resume) else stringResource(MR.strings.pause),
+                        vectorIcon = if (isPaused) painterResource(MR.images.play) else painterResource(MR.images.pause),
+                        parentSize = constraints.maxWidth
+                    )
+
                     Spacer(Modifier.weight(1f))
 
                     HybridButton(

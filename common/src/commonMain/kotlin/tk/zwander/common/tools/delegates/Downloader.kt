@@ -1,5 +1,6 @@
 package tk.zwander.common.tools.delegates
 
+import com.linroid.ketch.api.KetchError
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,7 @@ import tk.zwander.common.util.Event
 import tk.zwander.common.util.FileManager
 import tk.zwander.common.util.eventManager
 import tk.zwander.common.util.invoke
+import tk.zwander.common.util.ketch
 import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.commonCompose.model.DownloadModel
 import tk.zwander.samloaderkotlin.resources.MR
@@ -79,81 +81,134 @@ object Downloader {
 
     @OptIn(ExperimentalTime::class)
     private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
+        val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
+
+        val fullFileName = fileName.replace(
+            ".zip",
+            "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
+        ).substringAfterLast("/")
+
+        val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
+            "DecryptionKey_${fullFileName}.txt"
+        } else {
+            null
+        }
+
+        val downloadDirectory = FileManager.pickDirectory()
+        val tempDirectory = FileManager.getTempDirectory()
+
+        val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+        val extractedEncFile = downloadDirectory?.child(fullFileName, false) ?: run {
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+        val decFile = downloadDirectory.child(
+            fullFileName.replace(".enc2", "")
+                .replace(".enc4", ""),
+            false,
+        )
+        val decKeyFile = downloadDirectory.let { dir ->
+            decryptionKeyFileName?.let { dec ->
+                dir.child(dec, false)
+            }
+        }
+
+        // Track temporary files for cleanup
+        model.addTempFile(encFile)
+        model.addTempFile(extractedEncFile)
+        model.addTempFile(decFile)
+        model.addTempFile(decKeyFile)
+
+        decKeyFile?.openOutputStream(false)?.use { output ->
+            if (fullFileName.endsWith(".enc2")) {
+                output.write(
+                    CryptUtils.getV2Key(
+                        model.fw.value,
+                        model.model.value,
+                        model.region.value,
+                    ).second.toByteArray(),
+                )
+            }
+
+            v4Key?.let {
+                output.write(v4Key.second.toByteArray())
+            }
+        }
+
+        // The FUS nonce can become invalid between BinaryInit and the actual
+        // file download (random 401). When that happens we regenerate the
+        // nonce and re-run both steps so the init and download share the same
+        // session, bounded to prevent an infinite loop.
+        val maxInitRetries = 3
+        var initRetries = 0
+        var md5: String? = null
+
         try {
-            val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
-            val request = Request.createBinaryInit(fileName, FusClient.getNonce(), fwVer, modelType, model.region.value)
-
-            FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
-
-            val fullFileName = fileName.replace(
-                ".zip",
-                "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
-            ).substringAfterLast("/")
-
-            val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
-                "DecryptionKey_${fullFileName}.txt"
-            } else {
-                null
-            }
-
-            val downloadDirectory = FileManager.pickDirectory()
-            val tempDirectory = FileManager.getTempDirectory()
-
-            val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
-                model.endJob("")
-                return
-            }
-            val extractedEncFile = downloadDirectory?.child(fullFileName, false) ?: run {
-                model.endJob("")
-                return
-            }
-            val decFile = downloadDirectory.child(
-                fullFileName.replace(".enc2", "")
-                    .replace(".enc4", ""),
-                false,
-            )
-            val decKeyFile = downloadDirectory.let { dir ->
-                decryptionKeyFileName?.let { dec ->
-                    dir.child(dec, false)
-                }
-            }
-
-            decKeyFile?.openOutputStream(false)?.use { output ->
-                if (fullFileName.endsWith(".enc2")) {
-                    output.write(
-                        CryptUtils.getV2Key(
-                            model.fw.value,
-                            model.model.value,
-                            model.region.value,
-                        ).second.toByteArray(),
-                    )
+            while (initRetries <= maxInitRetries) {
+                if (initRetries > 0) {
+                    FusClient.refreshNonce()
                 }
 
-                v4Key?.let {
-                    output.write(v4Key.second.toByteArray())
-                }
-            }
+                val request = Request.createBinaryInit(
+                    fileName,
+                    FusClient.getNonce(),
+                    fwVer,
+                    modelType,
+                    model.region.value,
+                )
+                FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
 
-            val md5 = if (extractedEncFile.getLength() < size) {
-                FusClient.downloadFile(
-                    fileName = path + fileName,
-                    start = encFile.getLength(),
-                    size = size,
-                    dest = encFile,
-                ) { current, max, bps ->
-                    model.progress.value = current to max
-                    model.speed.value = bps
+                try {
+                    md5 = if (extractedEncFile.getLength() < size) {
+                        FusClient.downloadFile(
+                            fileName = path + fileName,
+                            start = encFile.getLength(),
+                            size = size,
+                            dest = encFile,
+                        ) { current, max, bps ->
+                            // Check for pause
+                            while (model.isPaused.value) {
+                                kotlinx.coroutines.delay(100)
+                            }
 
-                    eventManager.sendEvent(
-                        Event.Download.Progress(
-                            status = MR.strings.downloading(),
-                            current = current,
-                            max = max,
-                        )
-                    )
+                            model.progress.value = current to max
+                            model.speed.value = bps
+
+                            eventManager.sendEvent(
+                                Event.Download.Progress(
+                                    status = MR.strings.downloading(),
+                                    current = current,
+                                    max = max,
+                                )
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                    break // download succeeded
+                } catch (e: KetchError) {
+                    val isAuth = when (e) {
+                        is KetchError.Http -> e.code == 401
+                        is KetchError.AuthenticationFailed -> true
+                        else -> false
+                    }
+                    if (isAuth && initRetries < maxInitRetries) {
+                        initRetries++
+                        // Drop the failed ketch task so the next attempt
+                        // starts clean with the refreshed nonce.
+                        ketch.tasks.value
+                            .find {
+                                it.request.url.contains("NF_SmartDownloadBinaryForMass.do")
+                            }?.remove()
+                        continue
+                    }
+                    throw e
                 }
-            } else {
-                null
             }
 
             if (crc32 != null) {
@@ -164,6 +219,11 @@ object Downloader {
                     encFile.getLength(),
                     crc32,
                 ) { current, max, bps ->
+                    // Check for pause
+                    while (model.isPaused.value) {
+                        kotlinx.coroutines.delay(100)
+                    }
+
                     model.progress.value = current to max
                     model.speed.value = bps
 
@@ -226,6 +286,11 @@ object Downloader {
                         output = output,
                         size = encFile.getLength(),
                         progressCallback = { current, max, bps ->
+                            // Check for pause
+                            while (model.isPaused.value) {
+                                kotlinx.coroutines.delay(100)
+                            }
+
                             model.progress.value = current to max
                             model.speed.value = bps
 
@@ -265,6 +330,11 @@ object Downloader {
                 key,
                 size,
             ) { current, max, bps ->
+                // Check for pause
+                while (model.isPaused.value) {
+                    kotlinx.coroutines.delay(100)
+                }
+
                 model.progress.value = current to max
                 model.speed.value = bps
 

@@ -59,6 +59,10 @@ object FusClient {
         return nonce
     }
 
+    suspend fun refreshNonce() {
+        generateNonce()
+    }
+
     private suspend fun generateNonce() {
         BugsnagUtils.addBreadcrumb(
             message = "Generating nonce.",
@@ -189,10 +193,12 @@ object FusClient {
         dest: IPlatformFile,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
     ): String? {
-        val authV = getAuthV(cloud = true)
         val url = getDownloadUrl(fileName)
 
-        val md5Request = globalHttpClient.prepareRequest {
+        // Probe for Content-MD5.
+        val authV = getAuthV(cloud = true)
+
+        val md5 = globalHttpClient.prepareRequest {
             method = HttpMethod.Get
             url(url)
             headers {
@@ -207,9 +213,7 @@ object FusClient {
                 this.socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
                 this.connectTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
             }
-        }
-
-        val md5 = md5Request.execute { response ->
+        }.execute { response ->
             response.headers["Content-MD5"]
         }
 
@@ -224,7 +228,7 @@ object FusClient {
                 url = url,
                 destination = Destination(dest.getAbsolutePath()),
                 headers = mapOf(
-                    "Authorization" to authV.also { println(it) },
+                    "Authorization" to authV,
                     "User-Agent" to "SMART 2.0",
                     "Cache-Control" to "no-cache",
                 ),
@@ -262,6 +266,14 @@ object FusClient {
         }
 
         return md5
+    }
+
+    private fun KetchError.isAuthFailure(): Boolean {
+        return when (this) {
+            is KetchError.Http -> code == 401
+            is KetchError.AuthenticationFailed -> true
+            else -> false
+        }
     }
 
     private fun HttpResponse.is401(body: String): Boolean {

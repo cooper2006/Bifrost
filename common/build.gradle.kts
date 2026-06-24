@@ -26,8 +26,6 @@ kotlin.sourceSets.all {
 val javaVersionEnum: JavaVersion by rootProject.extra
 
 kotlin {
-    jvmToolchain(javaVersionEnum.toString().toInt())
-
     val iosArm64 = iosArm64()
     val iosSimulatorArm64 = iosSimulatorArm64()
 

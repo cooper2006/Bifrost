@@ -61,6 +61,12 @@
     <string name="file">File</string>
     <!-- Displayed when Bifrost is currently downloading firmware -->
     <string name="downloading">Downloading</string>
+    <!-- Displayed when Bifrost is paused during download -->
+    <string name="paused">Paused</string>
+    <!-- Displayed on the pause button -->
+    <string name="pause">Pause</string>
+    <!-- Displayed on the resume button -->
+    <string name="resume">Resume</string>
     <!-- Displayed when an error occurs -->
     <string name="error">Error</string>
     <!-- Displayed when Bifrost is calculating the downloaded file's CRC and checking it against Samsung's value -->

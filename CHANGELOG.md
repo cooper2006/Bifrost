@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Added
+- **Pause/Resume button** in the Downloader tab — toggle pause during firmware download, resume with a single click
+- **Automatic temp file cleanup** — when a download is cancelled or completed, temporary encrypted firmware files are deleted from disk
+- `pause.svg` / `play.svg` icons for the pause/resume button
+
+### Changed
+- **Nonce refresh retry** — if Samsung returns a transient 401 between `BinaryInit` and the actual file download, the app regenerates the FUS nonce and retries (up to 3 times) instead of failing immediately
+- Refactored `Downloader.performDownload()` — moved file path resolution outside the try block, reduced nesting
+
+### Fixed
+- Removed unused `jvmToolchain` from `common/build.gradle.kts` and `desktop/build.gradle.kts`
+- Added `java.sql` module to desktop JVM module list (required by SQLite/Ketch)
+- Removed debug `println` of auth token from Ketch `DownloadRequest` headers
+
+---
+
 # 2.1.0
 - Add an option on Android to use the File framework (requires All Files Access, find it in the Settings tab).
 - Improve firmware version matching for model variants with multiple variant characters (e.g., SM-J710FN).

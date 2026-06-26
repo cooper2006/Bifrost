@@ -36,8 +36,11 @@ kotlinx-datetime = "0.8.0"
 kotlinx-io = "0.9.0"
 kotlinx-serialization = "1.11.0"
 kotlinxCryptoCrc32 = "0.0.4"
+kotlinx-coroutines-test = "1.11.0"
+kotlin-test = "1.9.22"
 ksoup = "0.2.6"
 ktor = "3.5.0"
+mockk = "1.14.5"
 material-icons-core = "1.7.3"
 materialyou = "0.4.0"
 moko-resources = "0.26.4"
@@ -93,10 +96,12 @@ kmpfile = { module = "dev.zwander:kmpfile", version.ref = "kmpfile" }
 kmpplatform = { module = "dev.zwander:kmpplatform", version.ref = "kmpplatform" }
 kotlin = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "kotlin" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlinx-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "kotlinx-atomicfu" }
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-crypto-crc32 = { module = "io.github.andreypfau:kotlinx-crypto-crc32", version.ref = "kotlinxCryptoCrc32" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
@@ -106,6 +111,7 @@ ktor-client-auth = { module = "io.ktor:ktor-client-auth", version.ref = "ktor" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 material-icons-core = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "material-icons-core" }
 moko-resources = { module = "dev.icerock.moko:resources", version.ref = "moko-resources" }
 moko-resources-compose = { module = "dev.icerock.moko:resources-compose", version.ref = "moko-resources" }
@@ -114,6 +120,7 @@ nsexceptionKt-core = { module = "com.rickclephas.kmp:nsexception-kt-core", versi
 multiplatformSettings = { module = "com.russhwolf:multiplatform-settings", version.ref = "multiplatform-settings" }
 multiplatformSettings-noArg = { module = "com.russhwolf:multiplatform-settings-no-arg", version.ref = "multiplatform-settings" }
 oshi-core = { module = "com.github.oshi:oshi-core", version.ref = "oshi" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 richeditor-compose = { module = "com.mohamedrejeb.richeditor:richeditor-compose", version.ref = "richeditorCompose" }
 semver = { module = "io.github.z4kn4fein:semver", version.ref = "semver" }
 slf4j = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }

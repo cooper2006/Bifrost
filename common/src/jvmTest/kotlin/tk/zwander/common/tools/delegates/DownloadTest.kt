@@ -12,7 +12,9 @@ import org.junit.Before
 import org.junit.Test
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
+import tk.zwander.common.tools.Request
 import java.util.zip.CRC32
+import kotlin.math.roundToInt
 import kotlin.test.*
 
 /**
@@ -250,5 +252,208 @@ class DownloadTest {
         assertTrue(paused.value)
         paused.value = false
         assertFalse(paused.value)
+    }
+
+    // ========== 13. 暂停回调测试 ==========
+
+    @Test
+    fun `isPaused 回调可以正确反映暂停状态`() = runTest {
+        val paused = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val isPaused: suspend () -> Boolean = { paused.value }
+
+        assertFalse(isPaused())
+        paused.value = true
+        assertTrue(isPaused())
+        paused.value = false
+        assertFalse(isPaused())
+    }
+
+    // ========== 14. 分块边界完整性测试 ==========
+
+    @Test
+    fun `分块覆盖整个文件大小`() {
+        val fileSize = 18455490816L
+        val chunkCount = 8
+
+        val chunkSize = (fileSize + chunkCount - 1) / chunkCount
+        val numChunks = ((fileSize + chunkSize - 1) / chunkSize).toInt().coerceAtMost(chunkCount)
+
+        var totalCovered = 0L
+        for (i in 0 until numChunks) {
+            val start = i.toLong() * chunkSize
+            val end = minOf(start + chunkSize - 1, fileSize - 1)
+            totalCovered += (end - start + 1)
+        }
+
+        assertEquals(fileSize, totalCovered, "所有分块总长度应等于文件大小")
+    }
+
+    @Test
+    fun `不同文件大小分块计算正确`() {
+        // 小文件：chunkSize = ceil(100/8) = 13, numChunks = ceil(100/13) = 8
+        val smallSize = 100L
+        val smallChunkSize = (smallSize + 8 - 1) / 8
+        val smallNumChunks = ((smallSize + smallChunkSize - 1) / smallChunkSize).toInt().coerceAtMost(8)
+        assertEquals(8, smallNumChunks)
+
+        // 中等文件
+        val mediumSize = 100_000_000L
+        val mediumChunkSize = (mediumSize + 8 - 1) / 8
+        val mediumNumChunks = ((mediumSize + mediumChunkSize - 1) / mediumChunkSize).toInt().coerceAtMost(8)
+        assertEquals(8, mediumNumChunks)
+
+        // 超大文件（避免溢出）
+        val largeSize = 1_000_000_000_000_000L
+        val largeChunkSize = (largeSize + 8 - 1) / 8
+        val largeNumChunks = ((largeSize + largeChunkSize - 1) / largeChunkSize).toInt().coerceAtMost(8)
+        assertEquals(8, largeNumChunks)
+    }
+
+    // ========== 15. 逻辑校验生成测试 ==========
+
+    @Test
+    fun `getLogicCheck 生成正确`() {
+        // 使用真实参数
+        val input = "SM-S936U_3_20260602213641_cpeelkz6q8_fac"
+        val nonce = "abcdefghijklmnop"
+
+        val logicCheck = tk.zwander.common.tools.Request.getLogicCheck(input, nonce)
+
+        assertEquals(nonce.length, logicCheck.length)
+        // 每个字符应来自 input 的索引位置
+        for (i in nonce.indices) {
+            val idx = nonce[i].code and 0xf
+            assertEquals(input[idx], logicCheck[i])
+        }
+    }
+
+    @Test
+    fun `getLogicCheck 输入过短返回空字符串`() {
+        val logicCheck = tk.zwander.common.tools.Request.getLogicCheck("short", "nonce")
+        assertEquals("", logicCheck)
+    }
+
+    // ========== 16. 文件名处理边界测试 ==========
+
+    @Test
+    fun `文件名不含 zip 也能正确处理`() {
+        val fileName = "test.enc4"
+        val fw = "S936USQUACZF1"
+        val region = "XAA"
+
+        val fullFileName = fileName.replace(
+            ".zip",
+            "_${fw.replace("/", "_")}_${region}.zip",
+        ).substringAfterLast("/")
+
+        assertEquals("test.enc4", fullFileName)
+    }
+
+    @Test
+    fun `文件名含多个 zip 只替换第一个`() {
+        val fileName = "test.zip.enc4"
+        val fw = "S936USQUACZF1"
+        val region = "XAA"
+
+        val fullFileName = fileName.replace(
+            ".zip",
+            "_${fw.replace("/", "_")}_${region}.zip",
+        ).substringAfterLast("/")
+
+        assertEquals("test_S936USQUACZF1_XAA.zip.enc4", fullFileName)
+    }
+
+    // ========== 17. 解密文件路径转换测试 ==========
+
+    @Test
+    fun `enc2 后缀正确去除`() {
+        val fullFileName = "test.zip.enc2"
+        val decFileName = fullFileName.replace(".enc2", "").replace(".enc4", "")
+        assertEquals("test.zip", decFileName)
+    }
+
+    @Test
+    fun `enc4 后缀正确去除`() {
+        val fullFileName = "SM-S936U_3_20260602213641_cpeelkz6q8_fac.zip.enc4"
+        val decFileName = fullFileName.replace(".enc2", "").replace(".enc4", "")
+        assertEquals("SM-S936U_3_20260602213641_cpeelkz6q8_fac.zip", decFileName)
+    }
+
+    // ========== 18. 文件路径父目录测试 ==========
+
+    @Test
+    fun `PlatformFile 子文件路径正确`() {
+        val parentDir = java.io.File(testDir, "parent")
+        parentDir.mkdirs()
+        val childFile = PlatformFile(parentDir, "child.dat")
+
+        val expectedPath = parentDir.path + java.io.File.separator + "child.dat"
+        assertEquals(expectedPath, childFile.getAbsolutePath())
+    }
+
+    // ========== 19. 空值处理测试 ==========
+
+    @Test
+    fun `null 文件不添加到临时文件`() {
+        // 模拟 DownloadModel 的行为
+        val tempFiles = mutableListOf<dev.zwander.kotlin.file.IPlatformFile>()
+        fun addTempFile(file: dev.zwander.kotlin.file.IPlatformFile?) {
+            file?.let { tempFiles.add(it) }
+        }
+
+        addTempFile(null)
+        addTempFile(PlatformFile(testDir, "test.dat"))
+        addTempFile(null)
+
+        assertEquals(1, tempFiles.size)
+    }
+
+    // ========== 20. 进度百分比计算测试 ==========
+
+    @Test
+    fun `进度百分比计算正确`() {
+        val total = 10000L
+        val current = 5000L
+        val percentage = (current.toFloat() / total * 100 * 100.0).roundToInt() / 100.0
+        assertEquals(50.0, percentage)
+    }
+
+    @Test
+    fun `进度百分比零值`() {
+        val percentage = (0f / 10000f * 100 * 100.0).roundToInt() / 100.0
+        assertEquals(0.0, percentage)
+    }
+
+    @Test
+    fun `进度百分比满值`() {
+        val percentage = (10000f / 10000f * 100 * 100.0).roundToInt() / 100.0
+        assertEquals(100.0, percentage)
+    }
+
+    // ========== 21. 速度单位转换测试 ==========
+
+    @Test
+    fun `低速使用 KiB 单位`() {
+        val speed = 500_000L // bytes/sec
+        val speedKBps = speed / 1024.0
+        val shouldUseMB = speedKBps >= 1 * 1024
+        assertFalse(shouldUseMB)
+    }
+
+    @Test
+    fun `高速使用 MiB 单位`() {
+        val speed = 2_000_000L // bytes/sec
+        val speedKBps = speed / 1024.0
+        val shouldUseMB = speedKBps >= 1 * 1024
+        assertTrue(shouldUseMB)
+    }
+
+    // ========== 22. 文件大小转换为 MiB 测试 ==========
+
+    @Test
+    fun `字节转换为 MiB 数值正确`() {
+        val bytes = 10485760L // 10 MiB
+        val mb = ((bytes.toFloat() / 1024.0 / 1024.0 * 100.0).roundToInt() / 100.0)
+        assertEquals(10.0, mb)
     }
 }

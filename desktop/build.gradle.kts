@@ -89,7 +89,7 @@ compose.desktop {
             macOS {
                 bundleID = packageName
                 iconFile.set(project.file("src/jvmMain/resources/icon.icns"))
-                packageVersion = "1." + rootProject.extra["versionCode"]
+                packageVersion = rootProject.extra["versionName"].toString()
                 targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
                 this.packageName = appName
 
@@ -116,7 +116,7 @@ compose.desktop {
             linux {
                 modules("jdk.security.auth")
                 iconFile.set(project.file("src/jvmMain/resources/icon.png"))
-                packageVersion = rootProject.extra["versionCode"].toString()
+                packageVersion = rootProject.extra["versionName"].toString()
                 targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             }
 

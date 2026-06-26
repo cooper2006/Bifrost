@@ -177,7 +177,7 @@ kotlin {
             dependsOn(commonMain)
 
             dependencies {
-//                api(libs.ktor.client.okhttp)
+                api(libs.ktor.client.okhttp)
                 api(libs.cryptography.provider.jdk)
             }
         }

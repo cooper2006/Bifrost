@@ -32,3 +32,13 @@
 /iosApp/output/
 /.idea/deploymentTargetDropDown.xml
 /.idea/appInsightsSettings.xml
+
+# IDE
+.vscode/
+
+# Generated files
+desktop/bin/
+docs/
+openmemory.md
+reasonix.toml
+.reasonix/

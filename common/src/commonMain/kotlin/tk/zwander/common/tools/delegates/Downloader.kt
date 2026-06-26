@@ -1,6 +1,7 @@
 package tk.zwander.common.tools.delegates
 
 import com.linroid.ketch.api.KetchError
+import dev.zwander.kotlin.file.IPlatformFile
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +82,27 @@ object Downloader {
 
     @OptIn(ExperimentalTime::class)
     private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
+        val logFile = java.io.File(System.getProperty("user.home"), "bifrost_debug.log")
+        
+        fun log(msg: String) {
+            val timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            val logMsg = "[$timestamp] $msg"
+            println(logMsg)
+            logFile.appendText(logMsg + "\n")
+        }
+        
+        log("DEBUG: performDownload called")
+        log("DEBUG: info = $info")
+        
         val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
+        
+        log("DEBUG: path = $path")
+        log("DEBUG: fileName = $fileName")
+        log("DEBUG: size = $size")
+        log("DEBUG: crc32 = $crc32")
+        log("DEBUG: v4Key = $v4Key")
+        log("DEBUG: fwVer = $fwVer")
+        log("DEBUG: modelType = $modelType")
 
         val fullFileName = fileName.replace(
             ".zip",
@@ -95,24 +116,56 @@ object Downloader {
         }
 
         val downloadDirectory = FileManager.pickDirectory()
-        val tempDirectory = FileManager.getTempDirectory()
-
-        val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
+        // Use download directory for temp files as well to avoid path issues
+        val tempDirectory = downloadDirectory
+        
+        log("DEBUG: downloadDirectory = $downloadDirectory")
+        log("DEBUG: tempDirectory = $tempDirectory")
+        log("DEBUG: downloadDirectory class = ${downloadDirectory?.javaClass?.name}")
+        log("DEBUG: About to create files")
+        log("DEBUG: Entering try block")
+        
+        var encFile: IPlatformFile? = null
+        var extractedEncFile: IPlatformFile? = null
+        var decFile: IPlatformFile? = null
+        
+        try {
+            log("DEBUG: Inside try block")
+            println("DEBUG: About to create encFile...")
+            encFile = downloadDirectory?.child(fullFileName, false)
+            println("DEBUG: encFile created: $encFile")
+            
+            println("DEBUG: About to create extractedEncFile...")
+            extractedEncFile = downloadDirectory?.child(fullFileName, false)
+            println("DEBUG: extractedEncFile created: $extractedEncFile")
+            
+            println("DEBUG: About to create decFile...")
+            decFile = downloadDirectory?.child(
+                fullFileName.replace(".enc2", "")
+                    .replace(".enc4", ""),
+                false,
+            )
+            println("DEBUG: decFile created: $decFile")
+        } catch (e: Exception) {
+            log("ERROR: Exception during file creation: ${e.message}")
+            e.printStackTrace()
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        } finally {
+            log("DEBUG: Finally block executed")
+        }
+        
+        if (encFile == null || extractedEncFile == null || decFile == null) {
+            log("ERROR: One or more files are null: encFile=$encFile, extractedEncFile=$extractedEncFile, decFile=$decFile")
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
         }
-        val extractedEncFile = downloadDirectory?.child(fullFileName, false) ?: run {
-            model.endJob("")
-            eventManager.sendEvent(Event.Download.Finish)
-            return
-        }
-        val decFile = downloadDirectory.child(
-            fullFileName.replace(".enc2", "")
-                .replace(".enc4", ""),
-            false,
-        )
-        val decKeyFile = downloadDirectory.let { dir ->
+        println("DEBUG: encFile = $encFile")
+        println("DEBUG: extractedEncFile = $extractedEncFile")
+        println("DEBUG: decFile = $decFile")
+        val decKeyFile = downloadDirectory?.let { dir ->
             decryptionKeyFileName?.let { dec ->
                 dir.child(dec, false)
             }
@@ -124,21 +177,27 @@ object Downloader {
         model.addTempFile(decFile)
         model.addTempFile(decKeyFile)
 
-        decKeyFile?.openOutputStream(false)?.use { output ->
+        println("DEBUG: decKeyFile = $decKeyFile")
+        decKeyFile?.let { keyFile ->
+            keyFile.openOutputStream(false)?.use { output ->
+            println("DEBUG: Writing decryption key")
             if (fullFileName.endsWith(".enc2")) {
-                output.write(
-                    CryptUtils.getV2Key(
-                        model.fw.value,
-                        model.model.value,
-                        model.region.value,
-                    ).second.toByteArray(),
-                )
+                val key = CryptUtils.getV2Key(
+                    model.fw.value,
+                    model.model.value,
+                    model.region.value,
+                ).second
+                println("DEBUG: V2 key length: ${key.length}")
+                output.write(key.toByteArray())
             }
 
             v4Key?.let {
-                output.write(v4Key.second.toByteArray())
+                println("DEBUG: V4 key length: ${it.second.length}")
+                output.write(it.second.toByteArray())
             }
-        }
+                println("DEBUG: Decryption key written successfully")
+            } ?: println("WARN: Failed to open decKeyFile output stream")
+        } ?: println("WARN: decKeyFile is null")
 
         // The FUS nonce can become invalid between BinaryInit and the actual
         // file download (random 401). When that happens we regenerate the
@@ -170,12 +229,8 @@ object Downloader {
                             start = encFile.getLength(),
                             size = size,
                             dest = encFile,
+                            isPaused = { model.isPaused.value },
                         ) { current, max, bps ->
-                            // Check for pause
-                            while (model.isPaused.value) {
-                                kotlinx.coroutines.delay(100)
-                            }
-
                             model.progress.value = current to max
                             model.speed.value = bps
 
@@ -321,12 +376,16 @@ object Downloader {
                         model.region.value,
                     ).first
                 } else {
-                    info.v4Key?.first!!
+                    info.v4Key?.first ?: run {
+                        model.endJob(MR.strings.decryptError("Missing decryption key (v4Key is null)"))
+                        eventManager.sendEvent(Event.Download.Finish)
+                        return
+                    }
                 }
 
             CryptUtils.decryptProgress(
                 extractedEncFile.openInputStream() ?: return,
-                decFile?.openOutputStream() ?: return,
+                decFile.openOutputStream() ?: return,
                 key,
                 size,
             ) { current, max, bps ->
@@ -354,7 +413,13 @@ object Downloader {
 
             model.endJob(MR.strings.done())
         } catch (e: Throwable) {
-            val message = if (e !is CancellationException) "${e.message}" else ""
+            val message = if (e !is CancellationException) {
+                e.printStackTrace()
+                log("ERROR: ${e.message}")
+                log("ERROR: Stack trace:")
+                e.stackTrace.forEach { log("ERROR:   at $it") }
+                (e.message ?: e.toString())
+            } else ""
             model.endJob(message)
         }
 

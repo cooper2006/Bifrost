@@ -6,6 +6,9 @@ import io.github.vinceglb.filekit.FileKit
 import io.github.vinceglb.filekit.dialogs.openDirectoryPicker
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import io.github.vinceglb.filekit.dialogs.openFileSaver
+import java.io.File
+import javax.swing.JFileChooser
+import javax.swing.filechooser.FileSystemView
 
 actual object FileManager {
     actual suspend fun pickFile(): IPlatformFile? {
@@ -13,7 +16,22 @@ actual object FileManager {
     }
 
     actual suspend fun pickDirectory(): IPlatformFile? {
-        return FileKit.openDirectoryPicker()?.let { PlatformFile(it.file) }
+        val chooser = JFileChooser(FileSystemView.getFileSystemView())
+        chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+        chooser.isMultiSelectionEnabled = false
+        
+        val result = chooser.showOpenDialog(null)
+        
+        return if (result == JFileChooser.APPROVE_OPTION) {
+            val selectedFile = chooser.selectedFile
+            if (selectedFile != null) {
+                PlatformFile(selectedFile)
+            } else {
+                null
+            }
+        } else {
+            null
+        }
     }
 
     actual suspend fun saveFile(name: String): IPlatformFile? {
@@ -27,5 +45,7 @@ actual object FileManager {
         )?.let { PlatformFile(it.file) }
     }
 
-    actual suspend fun getTempDirectory(): IPlatformFile? = null
+    actual suspend fun getTempDirectory(): IPlatformFile? {
+        return PlatformFile(File.createTempFile("bifrost", "tmp").parentFile!!)
+    }
 }

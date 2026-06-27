@@ -4,10 +4,10 @@
 - **Pause/Resume button** in the Downloader tab — toggle pause during firmware download, resume with a single click
 - **Automatic temp file cleanup** — when a download is cancelled or completed, temporary encrypted firmware files are deleted from disk
 - `pause.svg` / `play.svg` icons for the pause/resume button
-- **Chunked parallel download** — large firmware files are now downloaded using multiple parallel connections with dynamic chunk sizing (50MB-200MB based on file size)
+- **Chunked parallel download** — large firmware files are now downloaded using multiple parallel connections with dynamic chunk sizing (50MB-4GB based on file size)
 - **Resumable download support** — application detects incomplete downloads on startup and prompts user to resume
 - **Resume Download dialog** — shows list of incomplete downloads with chunk progress and resume options
-- **Chunk progress display** — shows completed chunks count during download (e.g., "Chunks: 3/91")
+- **Chunk progress display** — shows completed chunks count during download (e.g., "Chunks: 3/5" for 18GB file with 4GB chunks)
 - `DownloadState` and `ChunkState` data models for tracking download progress
 - `DownloadStateManager` for persisting download state across sessions
 - Multi-language support for resume download strings (English and Chinese)

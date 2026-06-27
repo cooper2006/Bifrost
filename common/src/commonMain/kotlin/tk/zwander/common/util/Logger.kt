@@ -23,28 +23,56 @@ object Logger {
 }
 
 /**
- * 便捷的日志扩展函数 - 仅消息版本
+ * 便捷的日志扩展函数 - 带懒加载和异常支持
+ * 这些函数不会与 SLF4J 原生方法冲突
  */
-inline fun org.slf4j.Logger.debug(msg: String) {
+inline fun org.slf4j.Logger.debugLazy(msg: () -> String) {
     if (isDebugEnabled) {
-        debug(msg)
+        debug(msg())
     }
 }
 
-inline fun org.slf4j.Logger.info(msg: String) {
+inline fun org.slf4j.Logger.infoLazy(msg: () -> String) {
     if (isInfoEnabled) {
-        info(msg)
+        info(msg())
     }
 }
 
-inline fun org.slf4j.Logger.warn(msg: String) {
+inline fun org.slf4j.Logger.warnLazy(msg: () -> String) {
     if (isWarnEnabled) {
-        warn(msg)
+        warn(msg())
     }
 }
 
-inline fun org.slf4j.Logger.error(msg: String) {
+inline fun org.slf4j.Logger.errorLazy(msg: () -> String) {
     if (isErrorEnabled) {
-        error(msg)
+        error(msg())
+    }
+}
+
+/**
+ * 带异常的懒加载日志扩展函数
+ */
+inline fun org.slf4j.Logger.debugLazy(msg: () -> String, throwable: () -> Throwable) {
+    if (isDebugEnabled) {
+        debug(msg(), throwable())
+    }
+}
+
+inline fun org.slf4j.Logger.infoLazy(msg: () -> String, throwable: () -> Throwable) {
+    if (isInfoEnabled) {
+        info(msg(), throwable())
+    }
+}
+
+inline fun org.slf4j.Logger.warnLazy(msg: () -> String, throwable: () -> Throwable) {
+    if (isWarnEnabled) {
+        warn(msg(), throwable())
+    }
+}
+
+inline fun org.slf4j.Logger.errorLazy(msg: () -> String, throwable: () -> Throwable) {
+    if (isErrorEnabled) {
+        error(msg(), throwable())
     }
 }

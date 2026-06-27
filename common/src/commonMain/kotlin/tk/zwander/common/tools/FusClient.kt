@@ -67,17 +67,25 @@ object FusClient {
         HISTORY("SmartHistory.do", false),
     }
 
-    private var nonce = ""
+    /**
+     * Thread-safe state container for FusClient
+     */
+    private data class ClientState(
+        val nonce: String = "",
+        val auth: String = "",
+        val sessionId: String = "",
+    )
 
-    private var auth: String = ""
-    private var sessionId: String = ""
+    private val stateMutex = Mutex()
+    private var currentState = ClientState()
 
     suspend fun getNonce(): String {
-        if (nonce.isBlank()) {
-            generateNonce()
+        return stateMutex.withLock {
+            if (currentState.nonce.isBlank()) {
+                generateNonce()
+            }
+            currentState.nonce
         }
-
-        return nonce
     }
 
     suspend fun refreshNonce() {
@@ -92,7 +100,7 @@ object FusClient {
         )
         makeReq(Request.GENERATE_NONCE)
         BugsnagUtils.addBreadcrumb(
-            message = "Nonce: $nonce, Auth: $auth",
+            message = "Nonce: ${currentState.nonce}, Auth: ${currentState.auth}",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
@@ -101,6 +109,7 @@ object FusClient {
     private suspend fun makeSignatureHash(signature: String?): String? {
         if (signature == null) return null
 
+        val nonce = stateMutex.withLock { currentState.nonce }
         val hasher = CryptUtils.md5Provider.hasher()
         val a = hasher.hash("auth:$nonce:00000001".toByteArray()).toHexString()
         val b = hasher.hash("interface:$signature".toByteArray()).toHexString()
@@ -110,16 +119,20 @@ object FusClient {
 
     private suspend fun getAuthV(includeNonce: Boolean = true, signature: String? = null, cloud: Boolean = false): String {
         val hasSignature = !signature.isNullOrBlank()
-        val nonce = when {
-            includeNonce && hasSignature -> {
-                val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-                CharArray(16) { chars.random() }.joinToString("")
+        val (nonceValue, currentAuth) = stateMutex.withLock {
+            val nonceVal = when {
+                includeNonce && hasSignature -> {
+                    val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+                    CharArray(16) { chars.random() }.joinToString("")
+                }
+                includeNonce -> currentState.nonce
+                else -> ""
             }
-            includeNonce -> nonce
-            else -> ""
+            nonceVal to currentState.auth
         }
-        return "FUS nonce=\"${if (cloud) nonce else this.nonce}\", " +
-                "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: this.auth}\", " +
+
+        return "FUS nonce=\"${if (cloud) nonceValue else currentState.nonce}\", " +
+                "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: currentAuth}\", " +
                 "nc=\"${if (hasSignature) "00000001" else ""}\", " +
                 "type=\"${if (hasSignature) "auth" else ""}\", " +
                 "realm=\"${if (hasSignature) "interface" else ""}\""
@@ -136,8 +149,11 @@ object FusClient {
      * @return the response body data, as text. Usually XML.
      */
     suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
-        if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
-            generateNonce()
+        val currentNonce = stateMutex.withLock {
+            if (currentState.nonce.isBlank() && request != Request.GENERATE_NONCE) {
+                generateNonce()
+            }
+            currentState.nonce
         }
 
         val authV = getAuthV(cloud = request.cloud, signature = signature)
@@ -148,8 +164,9 @@ object FusClient {
                 headers {
                     append("Authorization", authV)
                     append("User-Agent", "SMART 2.0")
-                    append("Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
-                    append("Set-Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
+                    val sessionId = stateMutex.withLock { currentState.sessionId }
+                    append("Cookie", "JSESSIONID=$sessionId;SESSION=$sessionId")
+                    append("Set-Cookie", "JSESSIONID=$sessionId;SESSION=$sessionId")
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
@@ -165,23 +182,31 @@ object FusClient {
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {
             try {
-                nonce = response.headers["NONCE"] ?: response.headers["nonce"] ?: ""
+                val newNonce = response.headers["NONCE"] ?: response.headers["nonce"] ?: ""
 
                 try {
-                    auth = CryptUtils.decryptNonce(nonce.take(16).padEnd((16 - nonce.length).coerceAtLeast(0), '0'))
-                } catch (_: Exception) {}
+                    val newAuth = CryptUtils.decryptNonce(newNonce.take(16).padEnd((16 - newNonce.length).coerceAtLeast(0), '0'))
+                    stateMutex.withLock {
+                        currentState = currentState.copy(
+                            nonce = newNonce,
+                            auth = newAuth,
+                        )
+                    }
+                } catch (e: Exception) {
+                    logger.warn("Failed to decrypt nonce", e)
+                }
             } catch (e: ArrayIndexOutOfBoundsException) {
                 BugsnagUtils.addBreadcrumb(
                     message = "Error generating nonce.",
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                e.printStackTrace()
+                logger.error("Error generating nonce", e)
             }
         }
 
         if (response.headers["Set-Cookie"] != null || response.headers["set-cookie"] != null) {
-            sessionId = response.headers.entries()
+            val newSessionId = response.headers.entries()
                 .firstNotNullOfOrNull { headers ->
                     headers.value.find { value ->
                         value.contains("JSESSIONID=") ||
@@ -191,7 +216,12 @@ object FusClient {
                 ?.replace("JSESSIONID=", "")
                 ?.replace("SESSION=", "")
                 ?.replace(Regex(";.*$"), "")
-                ?: sessionId
+
+            newSessionId?.let { sessionId ->
+                stateMutex.withLock {
+                    currentState = currentState.copy(sessionId = sessionId)
+                }
+            }
         }
 
         return body
@@ -226,10 +256,10 @@ object FusClient {
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit
     ): String? {
         logger.debug("streamDownloadWithHttpUrlConnection called, URL: $urlString, size: $size")
-        
+
         var connection: HttpURLConnection? = null
         var inputStream: InputStream? = null
-        
+
         try {
             connection = URI.create(urlString).toURL().openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -239,53 +269,55 @@ object FusClient {
             connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
             connection.readTimeout = 0  // No timeout for large files
             connection.instanceFollowRedirects = true
-            
+
             logger.debug("Response code: ${connection.responseCode}")
-            
+
             if (connection.responseCode >= 400) {
-                throw RuntimeException("HTTP error: ${connection.responseCode} ${connection.responseMessage}")
+                throw IOException("HTTP error: ${connection.responseCode} ${connection.responseMessage}")
             }
-            
+
             inputStream = connection.inputStream
-            
+
             val startTime = System.nanoTime()
             var totalWritten = 0L
             val buffer = ByteArray(DEFAULT_CHUNK_SIZE)
-            
+
             logger.debug("About to open output stream...")
             val outputStream = dest.openOutputStream(false)
             logger.debug("openOutputStream result: ${outputStream != null}")
-            
+
             if (outputStream == null) {
                 val errorMsg = "Failed to open output stream for file: $dest"
                 logger.error("ERROR: $errorMsg")
                 throw IOException(errorMsg)
             }
-            
+
             outputStream.use { fos ->
-                var bytesRead: Int
-                var lastProgressLog = System.nanoTime()
-                
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    // Check pause state
-                    while (isPaused()) {
-                        kotlinx.coroutines.delay(100)
-                    }
-                    
-                    fos.write(buffer, 0, bytesRead)
-                    totalWritten += bytesRead
-                    
-                    // Report progress every second
-                    val now = System.nanoTime()
-                    if (now - lastProgressLog > 1_000_000_000L) {
-                        val elapsed = (now - startTime) / 1_000_000.0
-                        val bps = if (elapsed > 0) (totalWritten * 1000.0 / elapsed).toLong() else 0L
-                        progressCallback(totalWritten, size, bps)
-                        lastProgressLog = now
+                inputStream.use { input ->
+                    var bytesRead: Int
+                    var lastProgressLog = System.nanoTime()
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        // Check pause state
+                        while (isPaused()) {
+                            kotlinx.coroutines.delay(100)
+                        }
+
+                        fos.write(buffer, 0, bytesRead)
+                        totalWritten += bytesRead
+
+                        // Report progress every second
+                        val now = System.nanoTime()
+                        if (now - lastProgressLog > 1_000_000_000L) {
+                            val elapsed = (now - startTime) / 1_000_000.0
+                            val bps = if (elapsed > 0) (totalWritten * 1000.0 / elapsed).toLong() else 0L
+                            progressCallback(totalWritten, size, bps)
+                            lastProgressLog = now
+                        }
                     }
                 }
             }
-            
+
             logger.info("Download completed, total bytes written: $totalWritten")
             return null  // MD5 validation skipped for streaming download
         } catch (e: Exception) {
@@ -334,9 +366,9 @@ object FusClient {
             }
 
             inputStream = connection.inputStream
-            
+
             val contentLength = connection.contentLength
-            log("Content length from connection: $contentLength, inputStream available: ${inputStream.available()}")
+            log("Content length from connection: $contentLength")
 
             val outputStream = destFile.openOutputStream(false)
                 ?: throw IOException("Failed to open output stream for chunk ${chunk.chunkId}")
@@ -346,17 +378,19 @@ object FusClient {
             var lastProgress = 0L
 
             outputStream.use { fos ->
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    while (isPaused()) {
-                        kotlinx.coroutines.delay(100)
-                    }
+                inputStream.use { input ->
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        while (isPaused()) {
+                            kotlinx.coroutines.delay(100)
+                        }
 
-                    fos.write(buffer, 0, bytesRead)
-                    bytesDownloaded += bytesRead
+                        fos.write(buffer, 0, bytesRead)
+                        bytesDownloaded += bytesRead
 
-                    if (bytesDownloaded - lastProgress >= ProgressUpdateInterval) {
-                        onProgress(bytesDownloaded - lastProgress)
-                        lastProgress = bytesDownloaded
+                        if (bytesDownloaded - lastProgress >= ProgressUpdateInterval) {
+                            onProgress(bytesDownloaded - lastProgress)
+                            lastProgress = bytesDownloaded
+                        }
                     }
                 }
             }
@@ -394,9 +428,8 @@ object FusClient {
         val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
 
         var retryCount = 0
-        
+
         while (retryCount <= retryPolicy.maxRetries) {
-            // Handle 401 Unauthorized - refresh nonce and retry
             if (retryCount > 0) {
                 val currentAuthV = getAuthV(cloud = true)
                 val (downloaded, status) = downloadChunkInternal(
@@ -406,13 +439,13 @@ object FusClient {
                     destFile = destFile,
                     isPaused = isPaused,
                     onProgress = onProgress,
-                    log = { msg -> 
+                    log = { msg ->
                         when {
-                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) ->
                                 chunkLogger.error(msg)
-                            msg.contains("Retrying", ignoreCase = true) -> 
+                            msg.contains("Retrying", ignoreCase = true) ->
                                 chunkLogger.info(msg)
-                            else -> 
+                            else ->
                                 chunkLogger.info(msg)
                         }
                     }
@@ -438,7 +471,6 @@ object FusClient {
                     )
                 }
             } else {
-                // First attempt - check for auth error
                 val connection = URI.create(urlString).toURL().openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("Authorization", getAuthV(cloud = true))
@@ -449,7 +481,7 @@ object FusClient {
                 connection.instanceFollowRedirects = true
 
                 val responseCode = connection.responseCode
-                
+
                 chunkLogger.info("Start: ${chunk.startByte}, End: ${chunk.endByte}, Size: ${chunk.endByte - chunk.startByte + 1}")
                 chunkLogger.info("Response code: $responseCode")
 
@@ -465,7 +497,6 @@ object FusClient {
                     throw IOException("HTTP error: $responseCode ${connection.responseMessage}")
                 }
 
-                // Not an auth error, proceed with normal download
                 val (downloaded, status) = downloadChunkInternal(
                     urlString = urlString,
                     authV = getAuthV(cloud = true),
@@ -473,11 +504,11 @@ object FusClient {
                     destFile = destFile,
                     isPaused = isPaused,
                     onProgress = onProgress,
-                    log = { msg -> 
+                    log = { msg ->
                         when {
-                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) ->
                                 chunkLogger.error(msg)
-                            else -> 
+                            else ->
                                 chunkLogger.info(msg)
                         }
                     }
@@ -504,8 +535,7 @@ object FusClient {
                 }
             }
         }
-        
-        // Should not reach here, but return failed state as fallback
+
         return chunk.copy(status = ChunkStatus.FAILED)
     }
 
@@ -519,7 +549,7 @@ object FusClient {
         onProgress: suspend (bytesRead: Long) -> Unit,
     ): ChunkState {
         val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
-        
+
         val (downloaded, status) = downloadChunkInternal(
             urlString = urlString,
             authV = authV,
@@ -527,16 +557,16 @@ object FusClient {
             destFile = destFile,
             isPaused = isPaused,
             onProgress = onProgress,
-            log = { msg -> 
+            log = { msg ->
                 when {
-                    msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                    msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) ->
                         chunkLogger.error(msg)
-                    else -> 
+                    else ->
                         chunkLogger.info(msg)
                 }
             }
         )
-        
+
         return chunk.copy(
             downloadedBytes = downloaded,
             status = status,
@@ -573,7 +603,7 @@ object FusClient {
             outputStream.close()
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.error("Failed to merge chunk files: ${e.message}")
             false
         }
     }
@@ -623,8 +653,7 @@ object FusClient {
         val chunkSize = ChunkSizeCalculator.calculate(size)
 
         logger.info("Calculated chunk size: $chunkSize bytes")
-        
-        // Check nonce expiration and refresh if needed
+
         val existingState = DownloadStateManager.loadState(firmwareId)
         if (existingState != null && NoncePolicy.isNonceExpired(existingState.downloadStartTime)) {
             logger.warn("Nonce expired (age: ${NoncePolicy.getNonceAge(existingState.downloadStartTime)}ms), refreshing...")
@@ -640,8 +669,7 @@ object FusClient {
         logger.info("Starting chunked download for file: $fileName, size: $size, dest: ${dest.getAbsolutePath()}")
 
         val destName = dest.getName()
-        
-        // Create chunk directory - need to ensure it exists
+
         val chunkDirPath = java.io.File(destDir.getAbsolutePath(), ".bifrost_chunks")
         if (!chunkDirPath.exists()) {
             chunkDirPath.mkdirs()
@@ -675,7 +703,7 @@ object FusClient {
             newState
         }
 
-        val stateMutex = Mutex()
+        val localStateMutex = Mutex()
         var currentState = initialState
         var totalDownloaded = initialState.downloadedBytes
         val startTime = System.nanoTime()
@@ -689,7 +717,7 @@ object FusClient {
 
         suspend fun saveProgressIfNeeded() {
             if (totalDownloaded - lastSaveBytes >= ProgressUpdateInterval) {
-                stateMutex.withLock {
+                localStateMutex.withLock {
                     DownloadStateManager.saveState(currentState)
                 }
                 lastSaveBytes = totalDownloaded
@@ -698,7 +726,7 @@ object FusClient {
 
         suspend fun onChunkProgress(chunkId: Int, bytesDelta: Long) {
             totalDownloaded += bytesDelta
-            stateMutex.withLock {
+            localStateMutex.withLock {
                 val chunks = currentState.chunks.toMutableList()
                 val chunkIndex = chunks.indexOfFirst { it.chunkId == chunkId }
                 if (chunkIndex >= 0) {
@@ -735,13 +763,13 @@ object FusClient {
             suspend fun refreshNonceIfNeeded(): Boolean {
                 val now = System.currentTimeMillis()
                 if (now - lastNonceRefreshTime < minNonceRefreshInterval) {
-                    return true  // 最近刚刷新过，直接返回
+                    return true
                 }
-                
+
                 if (nonceRefreshMutex.tryLock()) {
                     try {
                         if (System.currentTimeMillis() - lastNonceRefreshTime < minNonceRefreshInterval) {
-                            return true  // 等待锁期间已经被其他线程刷新了
+                            return true
                         }
                         logger.info("Refreshing nonce (global)...")
                         onNonceRefresh()
@@ -752,7 +780,6 @@ object FusClient {
                         nonceRefreshMutex.unlock()
                     }
                 } else {
-                    // 等待另一个线程刷新完成
                     kotlinx.coroutines.delay(1000)
                     return true
                 }
@@ -770,13 +797,12 @@ object FusClient {
 
                             val chunkFile = getChunkFile(chunk.chunkId) ?: continue
                             logger.debug("Chunk file ${chunk.chunkId}: ${chunkFile.getAbsolutePath()}")
-                            
-                            // Create auth error callback for nonce refresh
+
                             val authErrorCallback: suspend () -> Unit = {
                                 logger.warn("Auth error detected in chunk ${chunk.chunkId}, triggering global nonce refresh...")
                                 refreshNonceIfNeeded()
                             }
-                            
+
                             val result = downloadSingleChunkWithRetry(
                                 urlString = url,
                                 chunk = chunk,
@@ -790,7 +816,7 @@ object FusClient {
                             )
                             logger.info("Chunk ${chunk.chunkId} result: status=${result.statusString}, downloaded=${result.downloadedBytes}")
 
-                            stateMutex.withLock {
+                            localStateMutex.withLock {
                                 val chunks = currentState.chunks.toMutableList()
                                 val chunkIndex = chunks.indexOfFirst { it.chunkId == chunk.chunkId }
                                 if (chunkIndex >= 0) {
@@ -807,7 +833,7 @@ object FusClient {
             }
         }
 
-        stateMutex.withLock {
+        localStateMutex.withLock {
             DownloadStateManager.saveState(currentState)
         }
 
@@ -845,7 +871,7 @@ object FusClient {
         val cleanupDuration = System.currentTimeMillis() - cleanupStartTime
         logger.debug("Cleanup complete in ${cleanupDuration}ms (${cleanupDuration / 1000.0}s)")
 
-        stateMutex.withLock {
+        localStateMutex.withLock {
             currentState = currentState.copy(
                 currentStage = DownloadStage.CRC_CHECKING,
                 downloadedBytes = size,
@@ -884,10 +910,10 @@ object FusClient {
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
     ): String? {
         logger.debug("downloadFile called for file: $fileName, size: $size, start: $start")
-        
+
         val url = getDownloadUrl(fileName)
         logger.debug("downloadUrl: $url")
-        
+
         val authV = getAuthV(cloud = true)
         logger.debug("authV: ${authV.take(50)}...")
 
@@ -895,15 +921,12 @@ object FusClient {
         logger.debug("Skipping MD5 probe for large file...")
         val md5: String? = null
 
-        // If file is already fully downloaded, skip.
         if (dest.getLength() >= size) {
             return md5
         }
 
-        // Use streaming download with HttpURLConnection for large files to avoid memory issues
-        // OkHttp buffers the entire response in memory, which causes OOM for files > 10GB
         logger.debug("Using streaming download with HttpURLConnection...")
-        
+
         return streamDownloadWithHttpUrlConnection(
             urlString = url,
             authV = authV,

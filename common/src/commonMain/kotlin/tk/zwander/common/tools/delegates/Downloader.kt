@@ -111,43 +111,10 @@ object Downloader {
         logger.debug("downloadDirectory = $downloadDirectory, tempDirectory = $tempDirectory")
         logger.debug("About to create files")
         
-        var encFile: IPlatformFile? = null
-        var extractedEncFile: IPlatformFile? = null
-        var decFile: IPlatformFile? = null
+        val files = createDownloadFiles(downloadDirectory, fullFileName)
+            ?: return
         
-        try {
-            logger.debug("About to create encFile...")
-            encFile = downloadDirectory?.child(fullFileName, false)
-            logger.debug("encFile created: $encFile")
-            
-            logger.debug("About to create extractedEncFile...")
-            extractedEncFile = downloadDirectory?.child(fullFileName, false)
-            logger.debug("extractedEncFile created: $extractedEncFile")
-            
-            logger.debug("About to create decFile...")
-            decFile = downloadDirectory?.child(
-                fullFileName.replace(".enc2", "")
-                    .replace(".enc4", ""),
-                false,
-            )
-            logger.debug("decFile created: $decFile")
-        } catch (e: Exception) {
-            logger.error("Exception during file creation")
-            logger.debug("Stack trace:", e)
-            model.endJob("")
-            eventManager.sendEvent(Event.Download.Finish)
-            return
-        } finally {
-            logger.debug("Finally block executed")
-        }
-        
-        if (encFile == null || extractedEncFile == null || decFile == null) {
-            logger.error("One or more files are null: encFile=$encFile, extractedEncFile=$extractedEncFile, decFile=$decFile")
-            model.endJob("")
-            eventManager.sendEvent(Event.Download.Finish)
-            return
-        }
-        logger.debug("encFile = $encFile, extractedEncFile = $extractedEncFile, decFile = $decFile")
+        val (encFile, extractedEncFile, decFile) = files
         val decKeyFile = downloadDirectory?.let { dir ->
             decryptionKeyFileName?.let { dec ->
                 dir.child(dec, false)
@@ -161,26 +128,7 @@ object Downloader {
         model.addTempFile(decKeyFile)
 
         logger.debug("decKeyFile = $decKeyFile")
-        decKeyFile?.let { keyFile ->
-            keyFile.openOutputStream(false)?.use { output ->
-            logger.debug("Writing decryption key")
-            if (fullFileName.endsWith(".enc2")) {
-                val key = CryptUtils.getV2Key(
-                    model.fw.value,
-                    model.model.value,
-                    model.region.value,
-                ).second
-                logger.debug("V2 key length: ${key.length}")
-                output.write(key.toByteArray())
-            }
-
-            v4Key?.let {
-                logger.debug("V4 key length: ${it.second.length}")
-                output.write(it.second.toByteArray())
-            }
-                logger.debug("Decryption key written successfully")
-            } ?: logger.warn("Failed to open decKeyFile output stream")
-        } ?: logger.warn("decKeyFile is null")
+        writeDecryptionKey(decKeyFile, fullFileName, v4Key, model)
 
         // The FUS nonce can become invalid between BinaryInit and the actual
         // file download (random 401). When that happens we regenerate the
@@ -209,133 +157,18 @@ object Downloader {
                     val firmwareId = "${model.model.value}_${model.region.value}_${model.fw.value}"
                         .replace("/", "_")
 
-                    md5 = if (extractedEncFile.getLength() < size) {
-                        logger.debug("File size ${extractedEncFile.getLength()} < expected $size, starting download...")
-                        val downloadDir = downloadDirectory ?: run {
-                            model.endJob("")
-                            eventManager.sendEvent(Event.Download.Finish)
-                            return
-                        }
-
-                        val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
-                            .replace("/", "_")
-                        val existingState = DownloadStateManager.loadState(firmwareIdForState)
-                        model.totalChunks.value = existingState?.chunks?.size ?: 0
-                        model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
-
-                        FusClient.downloadFileChunked(
-                            fileName = path + fileName,
-                            size = size,
-                            dest = encFile,
-                            destDir = downloadDir,
-                            firmwareId = firmwareId,
-                            model = model.model.value,
-                            region = model.region.value,
-                            fw = model.fw.value,
-                            crc32 = crc32?.toString(),
-                            v4KeyBase64 = v4Key?.first?.let {
-                                kotlin.io.encoding.Base64.Default.encode(it)
-                            },
-                            isPaused = { model.isPaused.value },
-                            progressCallback = { current, max, bps ->
-                                model.progress.value = current to max
-                                model.speed.value = bps
-
-                                eventManager.sendEvent(
-                                    Event.Download.Progress(
-                                        status = MR.strings.downloading(),
-                                        current = current,
-                                        max = max,
-                                    )
-                                )
-                            },
-                            chunkProgressCallback = { completed, total ->
-                                model.completedChunks.value = completed
-                                model.totalChunks.value = total
-                            },
-                            onNonceRefresh = {
-                                logger.debug("Refreshing nonce due to auth error...")
-                                FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
-                                logger.debug("Nonce refreshed successfully")
-                            },
-                        )
-                    } else if (crc32 != null) {
-                        logger.debug("File exists with expected size, verifying CRC32...")
-                        val crcCheckPassed = runCatching {
-                            encFile.openInputStream()?.use { inputStream ->
-                                val crc = io.github.andreypfau.kotlinx.crypto.CRC32()
-                                val buffer = ByteArray(8192)
-                                var len = inputStream.readAtMostTo(buffer, 0, buffer.size)
-                                while (len > 0) {
-                                    crc.update(buffer, 0, len)
-                                    len = inputStream.readAtMostTo(buffer, 0, buffer.size)
-                                }
-                                val actualCrc = crc.intDigest()
-                                val expectedCrc = crc32.toInt()
-                                logger.debug("Pre-download CRC32 check - actual: $actualCrc, expected: $expectedCrc, file size: ${encFile.getLength()}")
-                                actualCrc == expectedCrc
-                            } ?: false
-                        }.getOrDefault(false)
-                        
-                        if (!crcCheckPassed) {
-                            logger.warn("Pre-download CRC32 check FAILED! Deleting corrupted file...")
-                            encFile.delete()
-                            
-                            val downloadDir = downloadDirectory ?: run {
-                                model.endJob("")
-                                eventManager.sendEvent(Event.Download.Finish)
-                                return
-                            }
-
-                            val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
-                                .replace("/", "_")
-                            val existingState = DownloadStateManager.loadState(firmwareIdForState)
-                            model.totalChunks.value = existingState?.chunks?.size ?: 0
-                            model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
-
-                            FusClient.downloadFileChunked(
-                                fileName = path + fileName,
-                                size = size,
-                                dest = encFile,
-                                destDir = downloadDir,
-                                firmwareId = firmwareId,
-                                model = model.model.value,
-                                region = model.region.value,
-                                fw = model.fw.value,
-                                crc32 = crc32.toString(),
-                                v4KeyBase64 = v4Key?.first?.let {
-                                    kotlin.io.encoding.Base64.Default.encode(it)
-                                },
-                                isPaused = { model.isPaused.value },
-                                progressCallback = { current, max, bps ->
-                                    model.progress.value = current to max
-                                    model.speed.value = bps
-
-                                    eventManager.sendEvent(
-                                        Event.Download.Progress(
-                                            status = MR.strings.downloading(),
-                                            current = current,
-                                            max = max,
-                                        )
-                                    )
-                                },
-                                chunkProgressCallback = { completed, total ->
-                                    model.completedChunks.value = completed
-                                    model.totalChunks.value = total
-                                },
-                                onNonceRefresh = {
-                                logger.debug("Refreshing nonce due to auth error...")
-                                FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
-                                logger.debug("Nonce refreshed successfully")
-                            },
-                            )
-                        } else {
-                            logger.debug("CRC32 check passed, skipping download")
-                            null
-                        }
-                    } else {
-                        null
-                    }
+                    md5 = handleFileDownload(
+                        encFile = encFile,
+                        extractedEncFile = extractedEncFile,
+                        downloadDirectory = downloadDirectory,
+                        path = path,
+                        fileName = fileName,
+                        size = size,
+                        crc32 = crc32,
+                        v4Key = v4Key,
+                        firmwareId = firmwareId,
+                        model = model,
+                    )
                     break // download succeeded
                 } catch (e: KetchError) {
                     val isAuth = when (e) {
@@ -524,6 +357,220 @@ object Downloader {
         }
 
         eventManager.sendEvent(Event.Download.Finish)
+    }
+
+    /**
+     * Create download file objects
+     */
+    private fun createDownloadFiles(
+        downloadDirectory: IPlatformFile?,
+        fullFileName: String,
+    ): Triple<IPlatformFile, IPlatformFile, IPlatformFile>? {
+        return try {
+            logger.debug("About to create encFile...")
+            val encFile = downloadDirectory?.child(fullFileName, false)
+            logger.debug("encFile created: $encFile")
+            
+            logger.debug("About to create extractedEncFile...")
+            val extractedEncFile = downloadDirectory?.child(fullFileName, false)
+            logger.debug("extractedEncFile created: $extractedEncFile")
+            
+            logger.debug("About to create decFile...")
+            val decFile = downloadDirectory?.child(
+                fullFileName.replace(".enc2", "")
+                    .replace(".enc4", ""),
+                false,
+            )
+            logger.debug("decFile created: $decFile")
+
+            if (encFile == null || extractedEncFile == null || decFile == null) {
+                logger.error("One or more files are null: encFile=$encFile, extractedEncFile=$extractedEncFile, decFile=$decFile")
+                return null
+            }
+
+            logger.debug("encFile = $encFile, extractedEncFile = $extractedEncFile, decFile = $decFile")
+            Triple(encFile, extractedEncFile, decFile)
+        } catch (e: Exception) {
+            logger.error("Exception during file creation")
+            logger.debug("Stack trace:", e)
+            null
+        }
+    }
+
+    /**
+     * Write decryption key to file
+     */
+    private fun writeDecryptionKey(
+        decKeyFile: IPlatformFile?,
+        fullFileName: String,
+        v4Key: Pair<ByteArray, String>?,
+        model: DownloadModel,
+    ) {
+        logger.debug("decKeyFile = $decKeyFile")
+        decKeyFile?.let { keyFile ->
+            keyFile.openOutputStream(false)?.use { output ->
+                logger.debug("Writing decryption key")
+                if (fullFileName.endsWith(".enc2")) {
+                    val key = CryptUtils.getV2Key(
+                        model.fw.value,
+                        model.model.value,
+                        model.region.value,
+                    ).second
+                    logger.debug("V2 key length: ${key.length}")
+                    output.write(key.toByteArray())
+                }
+
+                v4Key?.let {
+                    logger.debug("V4 key length: ${it.second.length}")
+                    output.write(it.second.toByteArray())
+                }
+                logger.debug("Decryption key written successfully")
+            } ?: logger.warn("Failed to open decKeyFile output stream")
+        } ?: logger.warn("decKeyFile is null")
+    }
+
+    /**
+     * Handle file download with CRC32 check and retry logic
+     */
+    private suspend fun handleFileDownload(
+        encFile: IPlatformFile,
+        extractedEncFile: IPlatformFile,
+        downloadDirectory: IPlatformFile?,
+        path: String,
+        fileName: String,
+        size: Long,
+        crc32: Long?,
+        v4Key: Pair<ByteArray, String>?,
+        firmwareId: String,
+        model: DownloadModel,
+    ): String? {
+        return if (extractedEncFile.getLength() < size) {
+            logger.debug("File size ${extractedEncFile.getLength()} < expected $size, starting download...")
+            val downloadDir = downloadDirectory ?: run {
+                model.endJob("")
+                eventManager.sendEvent(Event.Download.Finish)
+                return null
+            }
+
+            val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
+                .replace("/", "_")
+            val existingState = DownloadStateManager.loadState(firmwareIdForState)
+            model.totalChunks.value = existingState?.chunks?.size ?: 0
+            model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
+
+            FusClient.downloadFileChunked(
+                fileName = path + fileName,
+                size = size,
+                dest = encFile,
+                destDir = downloadDir,
+                firmwareId = firmwareId,
+                model = model.model.value,
+                region = model.region.value,
+                fw = model.fw.value,
+                crc32 = crc32?.toString(),
+                v4KeyBase64 = v4Key?.first?.let {
+                    kotlin.io.encoding.Base64.Default.encode(it)
+                },
+                isPaused = { model.isPaused.value },
+                progressCallback = { current, max, bps ->
+                    model.progress.value = current to max
+                    model.speed.value = bps
+
+                    eventManager.sendEvent(
+                        Event.Download.Progress(
+                            status = MR.strings.downloading(),
+                            current = current,
+                            max = max,
+                        )
+                    )
+                },
+                chunkProgressCallback = { completed, total ->
+                    model.completedChunks.value = completed
+                    model.totalChunks.value = total
+                },
+                onNonceRefresh = {
+                    logger.debug("Refreshing nonce due to auth error...")
+                    FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
+                    logger.debug("Nonce refreshed successfully")
+                },
+            )
+        } else if (crc32 != null) {
+            logger.debug("File exists with expected size, verifying CRC32...")
+            val crcCheckPassed = runCatching {
+                encFile.openInputStream()?.use { inputStream ->
+                    val crc = io.github.andreypfau.kotlinx.crypto.CRC32()
+                    val buffer = ByteArray(8192)
+                    var len = inputStream.readAtMostTo(buffer, 0, buffer.size)
+                    while (len > 0) {
+                        crc.update(buffer, 0, len)
+                        len = inputStream.readAtMostTo(buffer, 0, buffer.size)
+                    }
+                    val actualCrc = crc.intDigest()
+                    val expectedCrc = crc32.toInt()
+                    logger.debug("Pre-download CRC32 check - actual: $actualCrc, expected: $expectedCrc, file size: ${encFile.getLength()}")
+                    actualCrc == expectedCrc
+                } ?: false
+            }.getOrDefault(false)
+            
+            if (!crcCheckPassed) {
+                logger.warn("Pre-download CRC32 check FAILED! Deleting corrupted file...")
+                encFile.delete()
+                
+                val downloadDir = downloadDirectory ?: run {
+                    model.endJob("")
+                    eventManager.sendEvent(Event.Download.Finish)
+                    return null
+                }
+
+                val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
+                    .replace("/", "_")
+                val existingState = DownloadStateManager.loadState(firmwareIdForState)
+                model.totalChunks.value = existingState?.chunks?.size ?: 0
+                model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
+
+                FusClient.downloadFileChunked(
+                    fileName = path + fileName,
+                    size = size,
+                    dest = encFile,
+                    destDir = downloadDir,
+                    firmwareId = firmwareId,
+                    model = model.model.value,
+                    region = model.region.value,
+                    fw = model.fw.value,
+                    crc32 = crc32.toString(),
+                    v4KeyBase64 = v4Key?.first?.let {
+                        kotlin.io.encoding.Base64.Default.encode(it)
+                    },
+                    isPaused = { model.isPaused.value },
+                    progressCallback = { current, max, bps ->
+                        model.progress.value = current to max
+                        model.speed.value = bps
+
+                        eventManager.sendEvent(
+                            Event.Download.Progress(
+                                status = MR.strings.downloading(),
+                                current = current,
+                                max = max,
+                            )
+                        )
+                    },
+                    chunkProgressCallback = { completed, total ->
+                        model.completedChunks.value = completed
+                        model.totalChunks.value = total
+                    },
+                    onNonceRefresh = {
+                        logger.debug("Refreshing nonce due to auth error...")
+                        FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
+                        logger.debug("Nonce refreshed successfully")
+                    },
+                )
+            } else {
+                logger.debug("CRC32 check passed, skipping download")
+                null
+            }
+        } else {
+            null
+        }
     }
 
     suspend fun onFetch(model: DownloadModel) {

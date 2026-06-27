@@ -206,6 +206,12 @@ object FusClient {
     /** Progress update interval in bytes (10MB). */
     private const val ProgressUpdateInterval = 10L * 1024 * 1024
 
+    /** HTTP connection timeout in milliseconds (30 seconds). */
+    private const val HTTP_CONNECT_TIMEOUT_MS = 30_000
+
+    /** Minimum interval between nonce refreshes in milliseconds (5 seconds). */
+    private const val MIN_NONCE_REFRESH_INTERVAL_MS = 5_000L
+
     /**
      * Stream download using Java HttpURLConnection to avoid OkHttp buffering issues.
      * This is essential for very large files (10GB+) that would otherwise cause OOM.
@@ -230,7 +236,7 @@ object FusClient {
             connection.setRequestProperty("Authorization", authV)
             connection.setRequestProperty("User-Agent", "SMART 2.0")
             connection.setRequestProperty("Range", "bytes=$start-${size - 1}")
-            connection.connectTimeout = 30000
+            connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
             connection.readTimeout = 0  // No timeout for large files
             connection.instanceFollowRedirects = true
             
@@ -295,163 +301,33 @@ object FusClient {
     }
 
     /**
-     * Download a single chunk and return the updated chunk state.
-     * Uses HttpURLConnection for streaming to avoid memory issues.
+     * Common chunk download logic used by both retry and non-retry versions.
      */
-    /**
-     * Download a single chunk with retry support.
-     */
-    private suspend fun downloadSingleChunkWithRetry(
-        urlString: String,
-        chunk: ChunkState,
-        destFile: IPlatformFile,
-        isPaused: suspend () -> Boolean,
-        onProgress: suspend (bytesRead: Long) -> Unit,
-        retryPolicy: ChunkRetryPolicy,
-        onAuthError: suspend () -> Unit,
-    ): ChunkState {
-        val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
-
-        var retryCount = 0
-        
-        while (retryCount <= retryPolicy.maxRetries) {
-            var connection: HttpURLConnection? = null
-            var inputStream: InputStream? = null
-            var bytesDownloaded = 0L
-            
-            try {
-                val currentAuthV = getAuthV(cloud = true)
-                
-                connection = URI.create(urlString).toURL().openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Authorization", currentAuthV)
-                connection.setRequestProperty("User-Agent", "SMART 2.0")
-                connection.setRequestProperty("Range", "bytes=${chunk.startByte}-${chunk.endByte}")
-                connection.connectTimeout = 30000
-                connection.readTimeout = 0
-                connection.instanceFollowRedirects = true
-
-                val responseCode = connection.responseCode
-                
-                if (retryCount == 0) {
-                    chunkLogger.info("Start: ${chunk.startByte}, End: ${chunk.endByte}, Size: ${chunk.endByte - chunk.startByte + 1}")
-                    chunkLogger.info("Response code: $responseCode")
-                }
-
-                // Handle 401 Unauthorized - refresh nonce and retry
-                if (responseCode == 401) {
-                    chunkLogger.warn("Auth error (401), refreshing nonce...")
-                    connection.disconnect()
-                    onAuthError()
-                    retryCount++
-                    if (retryCount <= retryPolicy.maxRetries) {
-                        val delay = retryPolicy.getDelayForAttempt(retryCount - 1)
-                        chunkLogger.info("Retrying after ${delay}ms (attempt $retryCount/${retryPolicy.maxRetries})")
-                        kotlinx.coroutines.delay(delay)
-                        continue
-                    } else {
-                        chunkLogger.error("Max retries exceeded for auth error")
-                        return chunk.copy(
-                            downloadedBytes = bytesDownloaded,
-                            status = ChunkStatus.FAILED,
-                        )
-                    }
-                }
-
-                if (responseCode >= 400) {
-                    throw IOException("HTTP error: $responseCode ${connection.responseMessage}")
-                }
-
-                inputStream = connection.inputStream
-
-                val outputStream = destFile.openOutputStream(false)
-                    ?: throw IOException("Failed to open output stream for chunk ${chunk.chunkId}")
-
-                val buffer = ByteArray(DEFAULT_CHUNK_SIZE)
-                var bytesRead: Int
-                var lastProgress = 0L
-
-                outputStream.use { fos ->
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        while (isPaused()) {
-                            kotlinx.coroutines.delay(100)
-                        }
-
-                        fos.write(buffer, 0, bytesRead)
-                        bytesDownloaded += bytesRead
-
-                        if (bytesDownloaded - lastProgress >= ProgressUpdateInterval) {
-                            onProgress(bytesDownloaded - lastProgress)
-                            lastProgress = bytesDownloaded
-                        }
-                    }
-                }
-
-                if (bytesDownloaded > lastProgress) {
-                    onProgress(bytesDownloaded - lastProgress)
-                }
-
-                chunkLogger.info("Completed, downloaded $bytesDownloaded bytes, file size: ${destFile.getLength()}")
-                return chunk.copy(
-                    downloadedBytes = bytesDownloaded,
-                    status = ChunkStatus.COMPLETED,
-                )
-            } catch (e: Exception) {
-                chunkLogger.warn("Attempt $retryCount failed: ${e.message}")
-                chunkLogger.debug("Stack trace:", e)
-                
-                // Close resources
-                try {
-                    inputStream?.close()
-                    connection?.disconnect()
-                } catch (_: Exception) {}
-                
-                retryCount++
-                if (retryCount <= retryPolicy.maxRetries) {
-                    val delay = retryPolicy.getDelayForAttempt(retryCount - 1)
-                    chunkLogger.info("Retrying after ${delay}ms (attempt $retryCount/${retryPolicy.maxRetries})")
-                    kotlinx.coroutines.delay(delay)
-                    // Continue to next iteration
-                } else {
-                    chunkLogger.error("Max retries exceeded, marking chunk as failed")
-                    return chunk.copy(
-                        downloadedBytes = bytesDownloaded,
-                        status = ChunkStatus.FAILED,
-                    )
-                }
-            }
-        }
-        
-        // Should not reach here, but return failed state as fallback
-        return chunk.copy(status = ChunkStatus.FAILED)
-    }
-
-    private suspend fun downloadSingleChunk(
+    private suspend fun downloadChunkInternal(
         urlString: String,
         authV: String,
         chunk: ChunkState,
         destFile: IPlatformFile,
         isPaused: suspend () -> Boolean,
         onProgress: suspend (bytesRead: Long) -> Unit,
-    ): ChunkState {
-        val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
-
+        log: (String) -> Unit,
+    ): Pair<Long, ChunkStatus> {
         var connection: HttpURLConnection? = null
         var inputStream: InputStream? = null
         var bytesDownloaded = 0L
 
-        return try {
+        try {
             connection = URI.create(urlString).toURL().openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.setRequestProperty("Authorization", authV)
             connection.setRequestProperty("User-Agent", "SMART 2.0")
             connection.setRequestProperty("Range", "bytes=${chunk.startByte}-${chunk.endByte}")
-            connection.connectTimeout = 30000
+            connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
             connection.readTimeout = 0
             connection.instanceFollowRedirects = true
 
-            chunkLogger.info("Start: ${chunk.startByte}, End: ${chunk.endByte}, Size: ${chunk.endByte - chunk.startByte + 1}")
-            chunkLogger.info("Response code: ${connection.responseCode}, content length: ${connection.contentLength}")
+            log("Start: ${chunk.startByte}, End: ${chunk.endByte}, Size: ${chunk.endByte - chunk.startByte + 1}")
+            log("Response code: ${connection.responseCode}, content length: ${connection.contentLength}")
 
             if (connection.responseCode >= 400) {
                 throw IOException("HTTP error: ${connection.responseCode} ${connection.responseMessage}")
@@ -460,7 +336,7 @@ object FusClient {
             inputStream = connection.inputStream
             
             val contentLength = connection.contentLength
-            chunkLogger.debug("Content length from connection: $contentLength, inputStream available: ${inputStream.available()}")
+            log("Content length from connection: $contentLength, inputStream available: ${inputStream.available()}")
 
             val outputStream = destFile.openOutputStream(false)
                 ?: throw IOException("Failed to open output stream for chunk ${chunk.chunkId}")
@@ -489,24 +365,182 @@ object FusClient {
                 onProgress(bytesDownloaded - lastProgress)
             }
 
-            chunkLogger.info("Completed, downloaded $bytesDownloaded bytes, file size: ${destFile.getLength()}")
-            chunk.copy(
-                downloadedBytes = bytesDownloaded,
-                status = ChunkStatus.COMPLETED,
-            )
+            log("Completed, downloaded $bytesDownloaded bytes, file size: ${destFile.getLength()}")
+            return Pair(bytesDownloaded, ChunkStatus.COMPLETED)
         } catch (e: Exception) {
-            chunkLogger.error("Failed: ${e.message}")
-            chunkLogger.debug("Stack trace:", e)
-            chunk.copy(
-                downloadedBytes = bytesDownloaded,
-                status = ChunkStatus.FAILED,
-            )
+            log("Failed: ${e.message}")
+            log("Stack trace: ${e.stackTraceToString()}")
+            return Pair(bytesDownloaded, ChunkStatus.FAILED)
         } finally {
             try {
                 inputStream?.close()
                 connection?.disconnect()
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * Download a single chunk with retry support.
+     */
+    private suspend fun downloadSingleChunkWithRetry(
+        urlString: String,
+        chunk: ChunkState,
+        destFile: IPlatformFile,
+        isPaused: suspend () -> Boolean,
+        onProgress: suspend (bytesRead: Long) -> Unit,
+        retryPolicy: ChunkRetryPolicy,
+        onAuthError: suspend () -> Unit,
+    ): ChunkState {
+        val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
+
+        var retryCount = 0
+        
+        while (retryCount <= retryPolicy.maxRetries) {
+            // Handle 401 Unauthorized - refresh nonce and retry
+            if (retryCount > 0) {
+                val currentAuthV = getAuthV(cloud = true)
+                val (downloaded, status) = downloadChunkInternal(
+                    urlString = urlString,
+                    authV = currentAuthV,
+                    chunk = chunk,
+                    destFile = destFile,
+                    isPaused = isPaused,
+                    onProgress = onProgress,
+                    log = { msg -> 
+                        when {
+                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                                chunkLogger.error(msg)
+                            msg.contains("Retrying", ignoreCase = true) -> 
+                                chunkLogger.info(msg)
+                            else -> 
+                                chunkLogger.info(msg)
+                        }
+                    }
+                )
+
+                if (status == ChunkStatus.COMPLETED) {
+                    return chunk.copy(
+                        downloadedBytes = downloaded,
+                        status = ChunkStatus.COMPLETED,
+                    )
+                }
+
+                retryCount++
+                if (retryCount <= retryPolicy.maxRetries) {
+                    val delay = retryPolicy.getDelayForAttempt(retryCount - 1)
+                    chunkLogger.info("Retrying after ${delay}ms (attempt $retryCount/${retryPolicy.maxRetries})")
+                    kotlinx.coroutines.delay(delay)
+                } else {
+                    chunkLogger.error("Max retries exceeded, marking chunk as failed")
+                    return chunk.copy(
+                        downloadedBytes = downloaded,
+                        status = ChunkStatus.FAILED,
+                    )
+                }
+            } else {
+                // First attempt - check for auth error
+                val connection = URI.create(urlString).toURL().openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Authorization", getAuthV(cloud = true))
+                connection.setRequestProperty("User-Agent", "SMART 2.0")
+                connection.setRequestProperty("Range", "bytes=${chunk.startByte}-${chunk.endByte}")
+                connection.connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+                connection.readTimeout = 0
+                connection.instanceFollowRedirects = true
+
+                val responseCode = connection.responseCode
+                
+                chunkLogger.info("Start: ${chunk.startByte}, End: ${chunk.endByte}, Size: ${chunk.endByte - chunk.startByte + 1}")
+                chunkLogger.info("Response code: $responseCode")
+
+                if (responseCode == 401) {
+                    chunkLogger.warn("Auth error (401), refreshing nonce...")
+                    connection.disconnect()
+                    onAuthError()
+                    retryCount++
+                    continue
+                }
+
+                if (responseCode >= 400) {
+                    throw IOException("HTTP error: $responseCode ${connection.responseMessage}")
+                }
+
+                // Not an auth error, proceed with normal download
+                val (downloaded, status) = downloadChunkInternal(
+                    urlString = urlString,
+                    authV = getAuthV(cloud = true),
+                    chunk = chunk,
+                    destFile = destFile,
+                    isPaused = isPaused,
+                    onProgress = onProgress,
+                    log = { msg -> 
+                        when {
+                            msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                                chunkLogger.error(msg)
+                            else -> 
+                                chunkLogger.info(msg)
+                        }
+                    }
+                )
+
+                if (status == ChunkStatus.COMPLETED) {
+                    return chunk.copy(
+                        downloadedBytes = downloaded,
+                        status = ChunkStatus.COMPLETED,
+                    )
+                }
+
+                retryCount++
+                if (retryCount <= retryPolicy.maxRetries) {
+                    val delay = retryPolicy.getDelayForAttempt(retryCount - 1)
+                    chunkLogger.info("Retrying after ${delay}ms (attempt $retryCount/${retryPolicy.maxRetries})")
+                    kotlinx.coroutines.delay(delay)
+                } else {
+                    chunkLogger.error("Max retries exceeded, marking chunk as failed")
+                    return chunk.copy(
+                        downloadedBytes = downloaded,
+                        status = ChunkStatus.FAILED,
+                    )
+                }
+            }
+        }
+        
+        // Should not reach here, but return failed state as fallback
+        return chunk.copy(status = ChunkStatus.FAILED)
+    }
+
+    @Deprecated("Use downloadSingleChunkWithRetry instead", ReplaceWith("downloadSingleChunkWithRetry"))
+    private suspend fun downloadSingleChunk(
+        urlString: String,
+        authV: String,
+        chunk: ChunkState,
+        destFile: IPlatformFile,
+        isPaused: suspend () -> Boolean,
+        onProgress: suspend (bytesRead: Long) -> Unit,
+    ): ChunkState {
+        val chunkLogger = LoggerFactory.getLogger("FusClient.Chunk${chunk.chunkId}")
+        
+        val (downloaded, status) = downloadChunkInternal(
+            urlString = urlString,
+            authV = authV,
+            chunk = chunk,
+            destFile = destFile,
+            isPaused = isPaused,
+            onProgress = onProgress,
+            log = { msg -> 
+                when {
+                    msg.contains("Failed", ignoreCase = true) || msg.contains("Error", ignoreCase = true) -> 
+                        chunkLogger.error(msg)
+                    else -> 
+                        chunkLogger.info(msg)
+                }
+            }
+        )
+        
+        return chunk.copy(
+            downloadedBytes = downloaded,
+            status = status,
+        )
     }
 
     /**
@@ -696,7 +730,7 @@ object FusClient {
             val mutex = Mutex()
             val nonceRefreshMutex = Mutex()
             var lastNonceRefreshTime = 0L
-            val minNonceRefreshInterval = 5000L  // 最小刷新间隔 5 秒
+            val minNonceRefreshInterval = MIN_NONCE_REFRESH_INTERVAL_MS
 
             suspend fun refreshNonceIfNeeded(): Boolean {
                 val now = System.currentTimeMillis()

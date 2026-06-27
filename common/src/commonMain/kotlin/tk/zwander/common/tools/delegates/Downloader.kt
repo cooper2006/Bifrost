@@ -6,6 +6,7 @@ import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.FusClient
@@ -23,6 +24,8 @@ import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.commonCompose.model.DownloadModel
 import tk.zwander.samloaderkotlin.resources.MR
 import kotlin.time.ExperimentalTime
+
+private val logger = LoggerFactory.getLogger("Downloader")
 
 object Downloader {
     interface DownloadErrorCallback {
@@ -83,27 +86,12 @@ object Downloader {
 
     @OptIn(ExperimentalTime::class)
     private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
-        val logFile = java.io.File(System.getProperty("user.home"), "bifrost_debug.log")
-        
-        fun log(msg: String) {
-            val timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-            val logMsg = "[$timestamp] $msg"
-            println(logMsg)
-            logFile.appendText(logMsg + "\n")
-        }
-        
-        log("DEBUG: performDownload called")
-        log("DEBUG: info = $info")
+        logger.debug("performDownload called, info = $info")
         
         val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
         
-        log("DEBUG: path = $path")
-        log("DEBUG: fileName = $fileName")
-        log("DEBUG: size = $size")
-        log("DEBUG: crc32 = $crc32")
-        log("DEBUG: v4Key = $v4Key")
-        log("DEBUG: fwVer = $fwVer")
-        log("DEBUG: modelType = $modelType")
+        logger.debug("path = $path, fileName = $fileName, size = $size, crc32 = $crc32, modelType = $modelType")
+        logger.debug("fwVer = $fwVer")
 
         val fullFileName = fileName.replace(
             ".zip",
@@ -120,52 +108,46 @@ object Downloader {
         // Use download directory for temp files as well to avoid path issues
         val tempDirectory = downloadDirectory
         
-        log("DEBUG: downloadDirectory = $downloadDirectory")
-        log("DEBUG: tempDirectory = $tempDirectory")
-        log("DEBUG: downloadDirectory class = ${downloadDirectory?.javaClass?.name}")
-        log("DEBUG: About to create files")
-        log("DEBUG: Entering try block")
+        logger.debug("downloadDirectory = $downloadDirectory, tempDirectory = $tempDirectory")
+        logger.debug("About to create files")
         
         var encFile: IPlatformFile? = null
         var extractedEncFile: IPlatformFile? = null
         var decFile: IPlatformFile? = null
         
         try {
-            log("DEBUG: Inside try block")
-            println("DEBUG: About to create encFile...")
+            logger.debug("About to create encFile...")
             encFile = downloadDirectory?.child(fullFileName, false)
-            println("DEBUG: encFile created: $encFile")
+            logger.debug("encFile created: $encFile")
             
-            println("DEBUG: About to create extractedEncFile...")
+            logger.debug("About to create extractedEncFile...")
             extractedEncFile = downloadDirectory?.child(fullFileName, false)
-            println("DEBUG: extractedEncFile created: $extractedEncFile")
+            logger.debug("extractedEncFile created: $extractedEncFile")
             
-            println("DEBUG: About to create decFile...")
+            logger.debug("About to create decFile...")
             decFile = downloadDirectory?.child(
                 fullFileName.replace(".enc2", "")
                     .replace(".enc4", ""),
                 false,
             )
-            println("DEBUG: decFile created: $decFile")
+            logger.debug("decFile created: $decFile")
         } catch (e: Exception) {
-            log("ERROR: Exception during file creation: ${e.message}")
-            e.printStackTrace()
+            logger.error("Exception during file creation")
+            logger.debug("Stack trace:", e)
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
         } finally {
-            log("DEBUG: Finally block executed")
+            logger.debug("Finally block executed")
         }
         
         if (encFile == null || extractedEncFile == null || decFile == null) {
-            log("ERROR: One or more files are null: encFile=$encFile, extractedEncFile=$extractedEncFile, decFile=$decFile")
+            logger.error("One or more files are null: encFile=$encFile, extractedEncFile=$extractedEncFile, decFile=$decFile")
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
         }
-        println("DEBUG: encFile = $encFile")
-        println("DEBUG: extractedEncFile = $extractedEncFile")
-        println("DEBUG: decFile = $decFile")
+        logger.debug("encFile = $encFile, extractedEncFile = $extractedEncFile, decFile = $decFile")
         val decKeyFile = downloadDirectory?.let { dir ->
             decryptionKeyFileName?.let { dec ->
                 dir.child(dec, false)
@@ -178,27 +160,27 @@ object Downloader {
         model.addTempFile(decFile)
         model.addTempFile(decKeyFile)
 
-        println("DEBUG: decKeyFile = $decKeyFile")
+        logger.debug("decKeyFile = $decKeyFile")
         decKeyFile?.let { keyFile ->
             keyFile.openOutputStream(false)?.use { output ->
-            println("DEBUG: Writing decryption key")
+            logger.debug("Writing decryption key")
             if (fullFileName.endsWith(".enc2")) {
                 val key = CryptUtils.getV2Key(
                     model.fw.value,
                     model.model.value,
                     model.region.value,
                 ).second
-                println("DEBUG: V2 key length: ${key.length}")
+                logger.debug("V2 key length: ${key.length}")
                 output.write(key.toByteArray())
             }
 
             v4Key?.let {
-                println("DEBUG: V4 key length: ${it.second.length}")
+                logger.debug("V4 key length: ${it.second.length}")
                 output.write(it.second.toByteArray())
             }
-                println("DEBUG: Decryption key written successfully")
-            } ?: println("WARN: Failed to open decKeyFile output stream")
-        } ?: println("WARN: decKeyFile is null")
+                logger.debug("Decryption key written successfully")
+            } ?: logger.warn("Failed to open decKeyFile output stream")
+        } ?: logger.warn("decKeyFile is null")
 
         // The FUS nonce can become invalid between BinaryInit and the actual
         // file download (random 401). When that happens we regenerate the
@@ -228,7 +210,7 @@ object Downloader {
                         .replace("/", "_")
 
                     md5 = if (extractedEncFile.getLength() < size) {
-                        log("DEBUG: File size ${extractedEncFile.getLength()} < expected $size, starting download...")
+                        logger.debug("File size ${extractedEncFile.getLength()} < expected $size, starting download...")
                         val downloadDir = downloadDirectory ?: run {
                             model.endJob("")
                             eventManager.sendEvent(Event.Download.Finish)
@@ -272,13 +254,13 @@ object Downloader {
                                 model.totalChunks.value = total
                             },
                             onNonceRefresh = {
-                                log("DEBUG: Refreshing nonce due to auth error...")
+                                logger.debug("Refreshing nonce due to auth error...")
                                 FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
-                                log("DEBUG: Nonce refreshed successfully")
+                                logger.debug("Nonce refreshed successfully")
                             },
                         )
                     } else if (crc32 != null) {
-                        log("DEBUG: File exists with expected size, verifying CRC32...")
+                        logger.debug("File exists with expected size, verifying CRC32...")
                         val crcCheckPassed = runCatching {
                             encFile.openInputStream()?.use { inputStream ->
                                 val crc = io.github.andreypfau.kotlinx.crypto.CRC32()
@@ -290,13 +272,13 @@ object Downloader {
                                 }
                                 val actualCrc = crc.intDigest()
                                 val expectedCrc = crc32.toInt()
-                                log("DEBUG: Pre-download CRC32 check - actual: $actualCrc, expected: $expectedCrc, file size: ${encFile.getLength()}")
+                                logger.debug("Pre-download CRC32 check - actual: $actualCrc, expected: $expectedCrc, file size: ${encFile.getLength()}")
                                 actualCrc == expectedCrc
                             } ?: false
                         }.getOrDefault(false)
                         
                         if (!crcCheckPassed) {
-                            log("DEBUG: Pre-download CRC32 check FAILED! Deleting corrupted file...")
+                            logger.warn("Pre-download CRC32 check FAILED! Deleting corrupted file...")
                             encFile.delete()
                             
                             val downloadDir = downloadDirectory ?: run {
@@ -342,13 +324,13 @@ object Downloader {
                                     model.totalChunks.value = total
                                 },
                                 onNonceRefresh = {
-                                log("DEBUG: Refreshing nonce due to auth error...")
+                                logger.debug("Refreshing nonce due to auth error...")
                                 FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
-                                log("DEBUG: Nonce refreshed successfully")
+                                logger.debug("Nonce refreshed successfully")
                             },
                             )
                         } else {
-                            log("DEBUG: CRC32 check passed, skipping download")
+                            logger.debug("CRC32 check passed, skipping download")
                             null
                         }
                     } else {
@@ -383,7 +365,7 @@ object Downloader {
             if (crc32 != null) {
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingCRC()
-                log("DEBUG: Starting final CRC32 check, file size: ${encFile.getLength()}, expected CRC32: $crc32")
+                logger.debug("Starting final CRC32 check, file size: ${encFile.getLength()}, expected CRC32: $crc32")
                 val result = CryptUtils.checkCrc32(
                     encFile.openInputStream() ?: return,
                     encFile.getLength(),
@@ -406,13 +388,13 @@ object Downloader {
                     )
                 }
 
-                if (!result) {
-                    log("DEBUG: Final CRC32 check FAILED!")
-                    model.endJob(MR.strings.crcCheckFailed())
-                    return
-                } else {
-                    log("DEBUG: Final CRC32 check PASSED!")
-                }
+                    if (!result) {
+                        logger.error("Final CRC32 check FAILED!")
+                        model.endJob(MR.strings.crcCheckFailed())
+                        return
+                    } else {
+                        logger.debug("Final CRC32 check PASSED!")
+                    }
             }
 
             if (md5 != null) {
@@ -534,10 +516,8 @@ object Downloader {
             model.endJob(MR.strings.done())
         } catch (e: Throwable) {
             val message = if (e !is CancellationException) {
-                e.printStackTrace()
-                log("ERROR: ${e.message}")
-                log("ERROR: Stack trace:")
-                e.stackTrace.forEach { log("ERROR:   at $it") }
+                logger.error("Download error: ${e.message}")
+                logger.debug("Stack trace:", e)
                 (e.message ?: e.toString())
             } else ""
             model.endJob(message)

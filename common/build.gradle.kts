@@ -170,6 +170,13 @@ kotlin {
                 api(libs.ketch.core)
                 api(libs.ketch.ktor)
                 api(libs.ketch.sqlite)
+                api(libs.slf4j)
+            }
+        }
+
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.slf4j)
             }
         }
 

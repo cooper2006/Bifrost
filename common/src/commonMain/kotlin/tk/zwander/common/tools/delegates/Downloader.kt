@@ -13,6 +13,7 @@ import tk.zwander.common.tools.Request
 import tk.zwander.common.tools.VersionFetch
 import tk.zwander.common.util.BifrostSettings
 import tk.zwander.common.util.ChangelogHandler
+import tk.zwander.common.util.DownloadStateManager
 import tk.zwander.common.util.Event
 import tk.zwander.common.util.FileManager
 import tk.zwander.common.util.eventManager
@@ -223,24 +224,132 @@ object Downloader {
                 FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
 
                 try {
+                    val firmwareId = "${model.model.value}_${model.region.value}_${model.fw.value}"
+                        .replace("/", "_")
+
                     md5 = if (extractedEncFile.getLength() < size) {
-                        FusClient.downloadFile(
+                        log("DEBUG: File size ${extractedEncFile.getLength()} < expected $size, starting download...")
+                        val downloadDir = downloadDirectory ?: run {
+                            model.endJob("")
+                            eventManager.sendEvent(Event.Download.Finish)
+                            return
+                        }
+
+                        val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
+                            .replace("/", "_")
+                        val existingState = DownloadStateManager.loadState(firmwareIdForState)
+                        model.totalChunks.value = existingState?.chunks?.size ?: 0
+                        model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
+
+                        FusClient.downloadFileChunked(
                             fileName = path + fileName,
-                            start = encFile.getLength(),
                             size = size,
                             dest = encFile,
+                            destDir = downloadDir,
+                            firmwareId = firmwareId,
+                            model = model.model.value,
+                            region = model.region.value,
+                            fw = model.fw.value,
+                            crc32 = crc32?.toString(),
+                            v4KeyBase64 = v4Key?.first?.let {
+                                kotlin.io.encoding.Base64.Default.encode(it)
+                            },
                             isPaused = { model.isPaused.value },
-                        ) { current, max, bps ->
-                            model.progress.value = current to max
-                            model.speed.value = bps
+                            progressCallback = { current, max, bps ->
+                                model.progress.value = current to max
+                                model.speed.value = bps
 
-                            eventManager.sendEvent(
-                                Event.Download.Progress(
-                                    status = MR.strings.downloading(),
-                                    current = current,
-                                    max = max,
+                                eventManager.sendEvent(
+                                    Event.Download.Progress(
+                                        status = MR.strings.downloading(),
+                                        current = current,
+                                        max = max,
+                                    )
                                 )
+                            },
+                            chunkProgressCallback = { completed, total ->
+                                model.completedChunks.value = completed
+                                model.totalChunks.value = total
+                            },
+                            onNonceRefresh = {
+                                log("DEBUG: Refreshing nonce due to auth error...")
+                                FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
+                                log("DEBUG: Nonce refreshed successfully")
+                            },
+                        )
+                    } else if (crc32 != null) {
+                        log("DEBUG: File exists with expected size, verifying CRC32...")
+                        val crcCheckPassed = runCatching {
+                            encFile.openInputStream()?.use { inputStream ->
+                                val crc = io.github.andreypfau.kotlinx.crypto.CRC32()
+                                val buffer = ByteArray(8192)
+                                var len = inputStream.readAtMostTo(buffer, 0, buffer.size)
+                                while (len > 0) {
+                                    crc.update(buffer, 0, len)
+                                    len = inputStream.readAtMostTo(buffer, 0, buffer.size)
+                                }
+                                val actualCrc = crc.intDigest()
+                                val expectedCrc = crc32.toInt()
+                                log("DEBUG: Pre-download CRC32 check - actual: $actualCrc, expected: $expectedCrc, file size: ${encFile.getLength()}")
+                                actualCrc == expectedCrc
+                            } ?: false
+                        }.getOrDefault(false)
+                        
+                        if (!crcCheckPassed) {
+                            log("DEBUG: Pre-download CRC32 check FAILED! Deleting corrupted file...")
+                            encFile.delete()
+                            
+                            val downloadDir = downloadDirectory ?: run {
+                                model.endJob("")
+                                eventManager.sendEvent(Event.Download.Finish)
+                                return
+                            }
+
+                            val firmwareIdForState = "${model.model.value}_${model.region.value}_${model.fw.value}"
+                                .replace("/", "_")
+                            val existingState = DownloadStateManager.loadState(firmwareIdForState)
+                            model.totalChunks.value = existingState?.chunks?.size ?: 0
+                            model.completedChunks.value = existingState?.chunks?.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED } ?: 0
+
+                            FusClient.downloadFileChunked(
+                                fileName = path + fileName,
+                                size = size,
+                                dest = encFile,
+                                destDir = downloadDir,
+                                firmwareId = firmwareId,
+                                model = model.model.value,
+                                region = model.region.value,
+                                fw = model.fw.value,
+                                crc32 = crc32.toString(),
+                                v4KeyBase64 = v4Key?.first?.let {
+                                    kotlin.io.encoding.Base64.Default.encode(it)
+                                },
+                                isPaused = { model.isPaused.value },
+                                progressCallback = { current, max, bps ->
+                                    model.progress.value = current to max
+                                    model.speed.value = bps
+
+                                    eventManager.sendEvent(
+                                        Event.Download.Progress(
+                                            status = MR.strings.downloading(),
+                                            current = current,
+                                            max = max,
+                                        )
+                                    )
+                                },
+                                chunkProgressCallback = { completed, total ->
+                                    model.completedChunks.value = completed
+                                    model.totalChunks.value = total
+                                },
+                                onNonceRefresh = {
+                                log("DEBUG: Refreshing nonce due to auth error...")
+                                FusClient.makeReq(FusClient.Request.GENERATE_NONCE)
+                                log("DEBUG: Nonce refreshed successfully")
+                            },
                             )
+                        } else {
+                            log("DEBUG: CRC32 check passed, skipping download")
+                            null
                         }
                     } else {
                         null
@@ -254,12 +363,17 @@ object Downloader {
                     }
                     if (isAuth && initRetries < maxInitRetries) {
                         initRetries++
-                        // Drop the failed ketch task so the next attempt
-                        // starts clean with the refreshed nonce.
                         ketch.tasks.value
                             .find {
                                 it.request.url.contains("NF_SmartDownloadBinaryForMass.do")
                             }?.remove()
+                        continue
+                    }
+                    throw e
+                } catch (e: Exception) {
+                    val isAuth = e.message?.contains("401") == true
+                    if (isAuth && initRetries < maxInitRetries) {
+                        initRetries++
                         continue
                     }
                     throw e
@@ -269,6 +383,7 @@ object Downloader {
             if (crc32 != null) {
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingCRC()
+                log("DEBUG: Starting final CRC32 check, file size: ${encFile.getLength()}, expected CRC32: $crc32")
                 val result = CryptUtils.checkCrc32(
                     encFile.openInputStream() ?: return,
                     encFile.getLength(),
@@ -292,8 +407,11 @@ object Downloader {
                 }
 
                 if (!result) {
+                    log("DEBUG: Final CRC32 check FAILED!")
                     model.endJob(MR.strings.crcCheckFailed())
                     return
+                } else {
+                    log("DEBUG: Final CRC32 check PASSED!")
                 }
             }
 
@@ -365,50 +483,52 @@ object Downloader {
                 }
             }
 
-            model.speed.value = 0L
-            model.statusText.value = MR.strings.decrypting()
+            if (BifrostSettings.Keys.autoDecryptFirmware()) {
+                model.speed.value = 0L
+                model.statusText.value = MR.strings.decrypting()
 
-            val key =
-                if (fullFileName.endsWith(".enc2")) {
-                    CryptUtils.getV2Key(
-                        model.fw.value,
-                        model.model.value,
-                        model.region.value,
-                    ).first
-                } else {
-                    info.v4Key?.first ?: run {
-                        model.endJob(MR.strings.decryptError("Missing decryption key (v4Key is null)"))
-                        eventManager.sendEvent(Event.Download.Finish)
-                        return
+                val key =
+                    if (fullFileName.endsWith(".enc2")) {
+                        CryptUtils.getV2Key(
+                            model.fw.value,
+                            model.model.value,
+                            model.region.value,
+                        ).first
+                    } else {
+                        info.v4Key?.first ?: run {
+                            model.endJob(MR.strings.decryptError("Missing decryption key (v4Key is null)"))
+                            eventManager.sendEvent(Event.Download.Finish)
+                            return
+                        }
                     }
-                }
 
-            CryptUtils.decryptProgress(
-                extractedEncFile.openInputStream() ?: return,
-                decFile.openOutputStream() ?: return,
-                key,
-                size,
-            ) { current, max, bps ->
-                // Check for pause
-                while (model.isPaused.value) {
-                    kotlinx.coroutines.delay(100)
-                }
+                CryptUtils.decryptProgress(
+                    extractedEncFile.openInputStream() ?: return,
+                    decFile.openOutputStream() ?: return,
+                    key,
+                    size,
+                ) { current, max, bps ->
+                    // Check for pause
+                    while (model.isPaused.value) {
+                        kotlinx.coroutines.delay(100)
+                    }
 
-                model.progress.value = current to max
-                model.speed.value = bps
+                    model.progress.value = current to max
+                    model.speed.value = bps
 
-                eventManager.sendEvent(
-                    Event.Download.Progress(
-                        status = MR.strings.decrypting(),
-                        current = current,
-                        max = max,
+                    eventManager.sendEvent(
+                        Event.Download.Progress(
+                            status = MR.strings.decrypting(),
+                            current = current,
+                            max = max,
+                        )
                     )
-                )
-            }
+                }
 
-            if (BifrostSettings.Keys.autoDeleteEncryptedFirmware()) {
-                encFile.delete()
-                extractedEncFile.delete()
+                if (BifrostSettings.Keys.autoDeleteEncryptedFirmware() && BifrostSettings.Keys.autoDecryptFirmware()) {
+                    encFile.delete()
+                    extractedEncFile.delete()
+                }
             }
 
             model.endJob(MR.strings.done())

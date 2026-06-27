@@ -199,6 +199,11 @@
     <!-- A toggle of whether to automatically delete the downloaded encrypted firmware file once decryption is complete -->
     <string name="autoDeleteEncryptedFirmwareDesc">When downloading firmware from Samsung, Bifrost creates two files: the encrypted firmware from Samsung, and a ZIP containing the decrypted firmware files. Enable this option to automatically delete the encrypted file once it's been decrypted.</string>
 
+    <!-- A toggle of whether to automatically decrypt firmware after download -->
+    <string name="autoDecryptFirmware">Auto-Decrypt After Download</string>
+    <!-- A toggle of whether to automatically decrypt firmware after download -->
+    <string name="autoDecryptFirmwareDesc">Automatically decrypt the firmware file after download completes. Disable this option to keep the encrypted file and decrypt later manually.</string>
+
     <!-- A button to remove all persistent data Bifrost stores -->
     <string name="removeSavedData">Remove Saved Data</string>
     <!-- A button to remove all persistent data Bifrost stores -->
@@ -274,4 +279,12 @@
 
     <string name="use_file_framework">Use File Framework</string>
     <string name="use_file_framework_desc">Android\'s default file access framework doesn\'t support multi-connection downloads, so Bifrost has to download internally and then copy the file to your chosen destination. Enabling this will request file management permissions, allowing Bifrost direct file access to your internal storage.</string>
+
+    <!-- Resume Download Dialog -->
+    <string name="resumeDownloadTitle">Resume Download</string>
+    <string name="resumeDownloadMessage">Found %1$d incomplete download(s). Would you like to resume them?</string>
+    <string name="resumeDownloadItem">%1$s (%2$d/%3$d chunks)</string>
+    <string name="resume">Resume</string>
+    <string name="skipAll">Skip All</string>
+    <string name="noIncompleteDownloads">No incomplete downloads found</string>
 </resources>

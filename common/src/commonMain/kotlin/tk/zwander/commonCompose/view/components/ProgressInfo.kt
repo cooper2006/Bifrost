@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.icerock.moko.resources.compose.stringResource
 import tk.zwander.common.util.toStringDecimal
+import tk.zwander.commonCompose.model.DownloadModel
 import tk.zwander.commonCompose.model.BaseModel
 import tk.zwander.commonCompose.util.CustomArrangement
 import tk.zwander.samloaderkotlin.resources.MR
@@ -69,7 +70,7 @@ internal fun ProgressInfo(model: BaseModel) {
                     val newProgress = (progress.first.toFloat() / progress.second)
 
                     val animatedProgress by animateFloatAsState(
-                        targetValue = minOf(1f, round(newProgress * 1000f) / 1000f), // Get rid of some precision to reduce lag.
+                        targetValue = minOf(1f, round(newProgress * 1000f) / 1000f),
                         animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
                         visibilityThreshold = 1 / 10000f,
                     )
@@ -118,6 +119,23 @@ internal fun ProgressInfo(model: BaseModel) {
                             valueFontFamily = FontFamily.Monospace,
                         )
                     }
+                }
+            }
+        }
+
+        if (model is DownloadModel) {
+            val completedChunks by model.completedChunks.collectAsState()
+            val totalChunks by model.totalChunks.collectAsState()
+
+            AnimatedVisibility(visible = totalChunks > 0) {
+                Column {
+                    Spacer(Modifier.size(4.dp))
+
+                    Text(
+                        text = "Chunks: $completedChunks/$totalChunks",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

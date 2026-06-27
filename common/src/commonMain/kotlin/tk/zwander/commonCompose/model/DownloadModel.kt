@@ -2,6 +2,8 @@ package tk.zwander.commonCompose.model
 
 import dev.zwander.kotlin.file.IPlatformFile
 import kotlinx.coroutines.flow.MutableStateFlow
+import tk.zwander.common.data.ChunkState
+import tk.zwander.common.data.DownloadState
 import tk.zwander.common.data.changelog.Changelog
 import tk.zwander.common.util.BifrostSettings
 import tk.zwander.common.util.SettingsKey
@@ -41,6 +43,21 @@ class DownloadModel : BaseModel("download_model") {
     val isPaused = MutableStateFlow(false)
 
     /**
+     * Current download state for chunk progress tracking.
+     */
+    val downloadState = MutableStateFlow<DownloadState?>(null)
+
+    /**
+     * Total number of chunks.
+     */
+    val totalChunks = MutableStateFlow(0)
+
+    /**
+     * Number of completed chunks.
+     */
+    val completedChunks = MutableStateFlow(0)
+
+    /**
      * List of temporary files to clean up when download is cancelled.
      */
     private val _tempFiles = mutableListOf<IPlatformFile>()
@@ -70,7 +87,8 @@ class DownloadModel : BaseModel("download_model") {
 
     override fun onEnd(text: String) {
         super.onEnd(text)
-        // Clean up temp files when job ends (cancel or complete)
-        cleanupTempFiles()
+        downloadState.value = null
+        totalChunks.value = 0
+        completedChunks.value = 0
     }
 }

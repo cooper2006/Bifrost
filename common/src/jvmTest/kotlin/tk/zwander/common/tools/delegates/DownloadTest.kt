@@ -11,8 +11,12 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import tk.zwander.common.data.BinaryFileInfo
+import tk.zwander.common.data.ChunkSizeCalculator
+import tk.zwander.common.data.ChunkState
+import tk.zwander.common.data.DownloadState
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.Request
+import tk.zwander.common.util.DownloadStateManager
 import java.util.zip.CRC32
 import kotlin.math.roundToInt
 import kotlin.test.*
@@ -455,5 +459,199 @@ class DownloadTest {
         val bytes = 10485760L // 10 MiB
         val mb = ((bytes.toFloat() / 1024.0 / 1024.0 * 100.0).roundToInt() / 100.0)
         assertEquals(10.0, mb)
+    }
+
+    // ========== 23. 动态分块大小计算测试 ==========
+
+    @Test
+    fun `小文件不分块`() {
+        val smallSize = 50L * 1024 * 1024 // 50MiB
+        val chunkSize = ChunkSizeCalculator.calculate(smallSize)
+        assertEquals(smallSize, chunkSize)
+    }
+
+    @Test
+    fun `中等文件使用50MiB分块`() {
+        val mediumSize = 500L * 1024 * 1024 // 500MiB
+        val chunkSize = ChunkSizeCalculator.calculate(mediumSize)
+        assertEquals(50L * 1024 * 1024, chunkSize)
+    }
+
+    @Test
+    fun `大文件使用100MiB分块`() {
+        val largeSize = 2L * 1024 * 1024 * 1024 // 2GiB
+        val chunkSize = ChunkSizeCalculator.calculate(largeSize)
+        assertEquals(100L * 1024 * 1024, chunkSize)
+    }
+
+    @Test
+    fun `超大文件使用4GiB分块`() {
+        val hugeSize = 18L * 1024 * 1024 * 1024 // 18GiB
+        val chunkSize = ChunkSizeCalculator.calculate(hugeSize)
+        assertEquals(4L * 1024 * 1024 * 1024, chunkSize)
+    }
+
+    @Test
+    fun `1GiB文件使用100MiB分块`() {
+        val size = 1L * 1024 * 1024 * 1024 // 1GiB
+        val chunkSize = ChunkSizeCalculator.calculate(size)
+        assertEquals(100L * 1024 * 1024, chunkSize)
+    }
+
+    // ========== 24. DownloadState 状态管理测试 ==========
+
+    @Test
+    fun `DownloadState 创建正确`() {
+        val state = DownloadState(
+            firmwareId = "SM-S936U_XAA_S936USQUACZF1",
+            fileName = "test.zip.enc4",
+            filePath = "/downloads/test.zip.enc4",
+            fileSize = 18_000_000_000L,
+            model = "SM-S936U",
+            region = "XAA",
+            fw = "S936USQUACZF1",
+            chunkSize = 4L * 1024 * 1024 * 1024,
+            chunks = listOf(
+                ChunkState(chunkId = 0, startByte = 0, endByte = 3_999_999_999, downloadedBytes = 2_000_000_000),
+                ChunkState(chunkId = 1, startByte = 4_000_000_000, endByte = 7_999_999_999, downloadedBytes = 3_000_000_000),
+                ChunkState(chunkId = 2, startByte = 8_000_000_000, endByte = 11_999_999_999, downloadedBytes = 0),
+                ChunkState(chunkId = 3, startByte = 12_000_000_000, endByte = 15_999_999_999, downloadedBytes = 0),
+                ChunkState(chunkId = 4, startByte = 16_000_000_000, endByte = 17_999_999_999, downloadedBytes = 0),
+            )
+        )
+
+        assertEquals("SM-S936U_XAA_S936USQUACZF1", state.firmwareId)
+        assertEquals(18_000_000_000L, state.fileSize)
+        assertEquals(4L * 1024 * 1024 * 1024, state.chunkSize)
+        assertEquals(5, state.chunks.size)
+    }
+
+    @Test
+    fun `DownloadState 计算已下载字节数正确`() {
+        val chunks = listOf(
+            ChunkState(chunkId = 0, startByte = 0, endByte = 99, downloadedBytes = 100),
+            ChunkState(chunkId = 1, startByte = 100, endByte = 199, downloadedBytes = 50),
+            ChunkState(chunkId = 2, startByte = 200, endByte = 299, downloadedBytes = 0),
+        )
+
+        val state = DownloadState(
+            firmwareId = "test_id",
+            fileName = "test.zip",
+            filePath = "/test.zip",
+            fileSize = 300L,
+            model = "SM-X",
+            region = "XAA",
+            fw = "XXXXX",
+            chunks = chunks
+        )
+
+        assertEquals(3, state.chunks.size)
+    }
+
+    // ========== 25. ChunkState 分块状态测试 ==========
+
+    @Test
+    fun `ChunkState 创建正确`() {
+        val chunk = ChunkState(chunkId = 0, startByte = 0, endByte = 99, downloadedBytes = 100)
+        assertEquals(0, chunk.chunkId)
+        assertEquals(0, chunk.startByte)
+        assertEquals(99, chunk.endByte)
+        assertEquals(100, chunk.downloadedBytes)
+    }
+
+    @Test
+    fun `ChunkState 大小计算正确`() {
+        val chunk = ChunkState(chunkId = 0, startByte = 100, endByte = 199, downloadedBytes = 0)
+        assertEquals(100L, chunk.endByte - chunk.startByte + 1)
+    }
+
+    // ========== 26. DownloadStateManager 持久化测试 ==========
+
+    @Test
+    fun `DownloadStateManager 保存和加载状态`() = runTest {
+        val originalState = DownloadState(
+            firmwareId = "test_firmware_id",
+            fileName = "test.zip.enc4",
+            filePath = "/downloads/test.zip.enc4",
+            fileSize = 1_000_000_000L,
+            model = "SM-S936U",
+            region = "XAA",
+            fw = "S936USQUACZF1",
+            chunkSize = 100_000_000L,
+            downloadedBytes = 500_000_000L,
+            chunks = listOf(
+                ChunkState(chunkId = 0, startByte = 0, endByte = 99_999_999, downloadedBytes = 100_000_000),
+                ChunkState(chunkId = 1, startByte = 100_000_000, endByte = 199_999_999, downloadedBytes = 100_000_000),
+                ChunkState(chunkId = 2, startByte = 200_000_000, endByte = 299_999_999, downloadedBytes = 100_000_000),
+                ChunkState(chunkId = 3, startByte = 300_000_000, endByte = 399_999_999, downloadedBytes = 100_000_000),
+                ChunkState(chunkId = 4, startByte = 400_000_000, endByte = 499_999_999, downloadedBytes = 100_000_000),
+            )
+        )
+
+        DownloadStateManager.saveState(originalState)
+
+        val loadedState = DownloadStateManager.loadState("test_firmware_id")
+
+        assertNotNull(loadedState)
+        assertEquals("test_firmware_id", loadedState.firmwareId)
+        assertEquals("test.zip.enc4", loadedState.fileName)
+        assertEquals(1_000_000_000L, loadedState.fileSize)
+        assertEquals(500_000_000L, loadedState.downloadedBytes)
+        assertEquals(5, loadedState.chunks.size)
+
+        DownloadStateManager.deleteState("test_firmware_id")
+    }
+
+    @Test
+    fun `DownloadStateManager 删除状态`() = runTest {
+        val state = DownloadState(
+            firmwareId = "delete_test",
+            fileName = "test.zip",
+            filePath = "/test.zip",
+            fileSize = 100_000_000L,
+            model = "SM-X",
+            region = "XAA",
+            fw = "XXXXX"
+        )
+
+        DownloadStateManager.saveState(state)
+        assertNotNull(DownloadStateManager.loadState("delete_test"))
+
+        DownloadStateManager.deleteState("delete_test")
+        assertNull(DownloadStateManager.loadState("delete_test"))
+    }
+
+    @Test
+    fun `DownloadStateManager 获取所有未完成下载`() = runTest {
+        val state1 = DownloadState(
+            firmwareId = "incomplete_1",
+            fileName = "test1.zip",
+            filePath = "/test1.zip",
+            fileSize = 100_000_000L,
+            model = "SM-X",
+            region = "XAA",
+            fw = "XXXXX",
+            downloadedBytes = 50_000_000L
+        )
+
+        val state2 = DownloadState(
+            firmwareId = "incomplete_2",
+            fileName = "test2.zip",
+            filePath = "/test2.zip",
+            fileSize = 200_000_000L,
+            model = "SM-Y",
+            region = "XAB",
+            fw = "YYYYY",
+            downloadedBytes = 100_000_000L
+        )
+
+        DownloadStateManager.saveState(state1)
+        DownloadStateManager.saveState(state2)
+
+        val incomplete = DownloadStateManager.getIncompleteDownloads()
+        assertTrue(incomplete.size >= 2)
+
+        DownloadStateManager.deleteState("incomplete_1")
+        DownloadStateManager.deleteState("incomplete_2")
     }
 }

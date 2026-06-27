@@ -98,6 +98,13 @@ val options = arrayListOf<IOptionItem>().apply {
     )
     add(
         IOptionItem.BasicOptionItem.BooleanItem(
+            label = MR.strings.autoDecryptFirmware,
+            desc = MR.strings.autoDecryptFirmwareDesc,
+            key = BifrostSettings.Keys.autoDecryptFirmware,
+        ),
+    )
+    add(
+        IOptionItem.BasicOptionItem.BooleanItem(
             label = MR.strings.enable_offline_decryption,
             desc = MR.strings.enable_offline_decryption_desc,
             key = BifrostSettings.Keys.enableDecryptKeySave,

@@ -10,23 +10,22 @@ import com.linroid.ketch.engine.KtorHttpEngine
 import com.linroid.ketch.sqlite.DriverFactory
 import com.linroid.ketch.sqlite.createSqliteTaskStore
 import io.ktor.client.*
-import io.ktor.client.engine.okhttp.*
+import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutConfig
-import java.net.Proxy
 
-val globalHttpClient: HttpClient = HttpClient(OkHttp) {
+val globalHttpClient: HttpClient = HttpClient(CIO) {
     this.followRedirects = true
     this.expectSuccess = false
 
     install(HttpTimeout)
 
     engine {
-        config {
-            retryOnConnectionFailure(true)
+        endpoint {
+            maxConnectionsPerRoute = 16
+            keepAliveTime = 10000
+            connectTimeout = 30000
         }
-        
-        proxy = Proxy.NO_PROXY
     }
 }
 

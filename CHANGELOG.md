@@ -4,15 +4,26 @@
 - **Pause/Resume button** in the Downloader tab — toggle pause during firmware download, resume with a single click
 - **Automatic temp file cleanup** — when a download is cancelled or completed, temporary encrypted firmware files are deleted from disk
 - `pause.svg` / `play.svg` icons for the pause/resume button
+- **Chunked parallel download** — large firmware files are now downloaded using multiple parallel connections with dynamic chunk sizing (50MB-200MB based on file size)
+- **Resumable download support** — application detects incomplete downloads on startup and prompts user to resume
+- **Resume Download dialog** — shows list of incomplete downloads with chunk progress and resume options
+- **Chunk progress display** — shows completed chunks count during download (e.g., "Chunks: 3/91")
+- `DownloadState` and `ChunkState` data models for tracking download progress
+- `DownloadStateManager` for persisting download state across sessions
+- Multi-language support for resume download strings (English and Chinese)
 
 ### Changed
 - **Nonce refresh retry** — if Samsung returns a transient 401 between `BinaryInit` and the actual file download, the app regenerates the FUS nonce and retries (up to 3 times) instead of failing immediately
 - Refactored `Downloader.performDownload()` — moved file path resolution outside the try block, reduced nesting
+- **Chunk directory creation** — now uses `File.mkdirs()` to ensure `.bifrost_chunks` directory exists before downloading
 
 ### Fixed
 - Removed unused `jvmToolchain` from `common/build.gradle.kts` and `desktop/build.gradle.kts`
 - Added `java.sql` module to desktop JVM module list (required by SQLite/Ketch)
 - Removed debug `println` of auth token from Ketch `DownloadRequest` headers
+- **Chunk directory not created** — fixed issue where `.bifrost_chunks` directory was not being created, causing all chunks to be skipped
+- **Resume download not starting** — fixed issue where clicking resume button only closed the dialog without actually starting the download
+- **Pre-download CRC check logic** — optimized to skip check when starting fresh download, only verify when file already exists with expected size
 
 ---
 

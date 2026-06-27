@@ -45,6 +45,8 @@ object BifrostSettings {
             SettingsKey.Boolean("allowLowercaseCharacters", false, settings)
         val autoDeleteEncryptedFirmware =
             SettingsKey.Boolean("autoDeleteEncryptedFirmware", false, settings)
+        val autoDecryptFirmware =
+            SettingsKey.Boolean("autoDecryptFirmware", true, settings)
         val bugsnagUuid = SettingsKey.String<String?>("bugsnag_user_id", null, settings)
         val enableDecryptKeySave = SettingsKey.Boolean("enable_decryption_key_download", false, settings)
         val useFileFramework = SettingsKey.Boolean("use_file_framework", false, settings)

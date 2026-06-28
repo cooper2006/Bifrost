@@ -24,6 +24,12 @@
 - **Chunk directory not created** — fixed issue where `.bifrost_chunks` directory was not being created, causing all chunks to be skipped
 - **Resume download not starting** — fixed issue where clicking resume button only closed the dialog without actually starting the download
 - **Pre-download CRC check logic** — optimized to skip check when starting fresh download, only verify when file already exists with expected size
+- **Coroutine deadlock in FusClient** — fixed `stateMutex` reentrancy causing UI freeze when clicking download/check-update buttons
+- **ChunkState serialization** — removed `@Transient` annotation from `status` field, added `@Serializable` to enums for proper state persistence
+- **Progress update frequency** — added 500ms throttle to reduce UI recompositions during download
+- **FileManager SwingUtilities error** — removed `invokeAndWait` call on EDT to prevent `Cannot call invokeAndWait from the event dispatcher thread` error
+- **SLF4J logging configuration** — added system properties and JVM args to output debug logs to `~/bifrost_debug.log` file
+- **Large file chunk sizing** — confirmed support for up to 4GB chunks to reduce authentication failures for files >5GB
 
 ---
 

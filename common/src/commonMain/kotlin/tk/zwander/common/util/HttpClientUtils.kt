@@ -18,13 +18,17 @@ val globalHttpClient: HttpClient = HttpClient(CIO) {
     this.followRedirects = true
     this.expectSuccess = false
 
-    install(HttpTimeout)
+    install(HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        socketTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
 
     engine {
         endpoint {
             maxConnectionsPerRoute = 16
             keepAliveTime = 10000
-            connectTimeout = 30000
+            connectTimeout = 15000
         }
     }
 }

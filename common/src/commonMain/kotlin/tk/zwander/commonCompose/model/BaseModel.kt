@@ -92,8 +92,10 @@ abstract class BaseModel(
         onEnd(text)
     }
 
-    fun launchJob(block: suspend CoroutineScope.() -> Unit) {
-        _jobs.value += scope.launch(block = block)
+    fun launchJob(block: suspend CoroutineScope.() -> Unit): Job {
+        val job = scope.launch(block = block)
+        _jobs.value += job
+        return job
     }
 
     /**

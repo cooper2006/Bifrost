@@ -80,7 +80,6 @@ internal fun DownloadView() {
     val region by model.region.collectAsState()
     val fw by model.fw.collectAsState()
     val osCode by model.osCode.collectAsState()
-    val progress by model.progress.collectAsState()
     val statusText by model.statusText.collectAsState()
     val changelog by model.changelog.collectAsState()
     var changelogExpanded by model.changelogExpanded.collectAsMutableState()
@@ -343,7 +342,7 @@ internal fun DownloadView() {
             }
 
             AnimatedVisibility(
-                visible = hasRunningJobs || progress.first > 0 || progress.second > 0 || statusText.isNotBlank(),
+                visible = hasRunningJobs || statusText.isNotBlank(),
             ) {
                 Column {
                     Spacer(modifier = Modifier.size(4.dp))

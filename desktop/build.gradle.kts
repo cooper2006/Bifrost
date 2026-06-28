@@ -71,6 +71,14 @@ compose.desktop {
 
         mainClass = "MainKt"
         
+        jvmArgs += listOf(
+            "-Dorg.slf4j.simpleLogger.defaultLogLevel=debug",
+            "-Dorg.slf4j.simpleLogger.showDateTime=true",
+            "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss.SSS",
+            "-Dorg.slf4j.simpleLogger.showThreadName=false",
+            "-Dorg.slf4j.simpleLogger.cacheOutputStream=false"
+        )
+        
         nativeDistributions {
             modules("jdk.crypto.ec")
             modules("java.management")

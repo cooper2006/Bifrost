@@ -3,6 +3,8 @@ package tk.zwander.common.util
 import android.content.Context
 import dev.zwander.kotlin.file.IPlatformFile
 import dev.zwander.kotlin.file.PlatformFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import tk.zwander.common.data.ChunkState
@@ -31,18 +33,18 @@ actual object DownloadStateManager {
         dir
     }
 
-    actual suspend fun saveState(state: DownloadState) {
+    actual suspend fun saveState(state: DownloadState) = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "${state.firmwareId}.json")
         val updatedState = state.copy(lastUpdateTime = System.currentTimeMillis())
         val jsonString = json.encodeToString(updatedState)
         stateFile.writeText(jsonString)
     }
 
-    actual suspend fun loadState(firmwareId: String): DownloadState? {
+    actual suspend fun loadState(firmwareId: String): DownloadState? = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "$firmwareId.json")
-        if (!stateFile.exists()) return null
+        if (!stateFile.exists()) return@withContext null
 
-        return try {
+        try {
             val jsonString = stateFile.readText()
             json.decodeFromString<DownloadState>(jsonString).let { state ->
                 state.copy(
@@ -64,15 +66,15 @@ actual object DownloadStateManager {
         }
     }
 
-    actual suspend fun deleteState(firmwareId: String) {
+    actual suspend fun deleteState(firmwareId: String) = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "$firmwareId.json")
         if (stateFile.exists()) {
             stateFile.delete()
         }
     }
 
-    actual suspend fun getIncompleteDownloads(): List<DownloadState> {
-        return getAllStateFiles().mapNotNull { file ->
+    actual suspend fun getIncompleteDownloads(): List<DownloadState> = withContext(Dispatchers.IO) {
+        getAllStateFiles().mapNotNull { file ->
             try {
                 val state = loadState(file.getName().removeSuffix(".json"))
                 state?.takeIf { it.currentStage != DownloadStage.COMPLETED }
@@ -82,18 +84,18 @@ actual object DownloadStateManager {
         }
     }
 
-    actual suspend fun hasResumableDownload(firmwareId: String): Boolean {
+    actual suspend fun hasResumableDownload(firmwareId: String): Boolean = withContext(Dispatchers.IO) {
         val state = loadState(firmwareId)
-        return state != null && state.currentStage != DownloadStage.COMPLETED
+        state != null && state.currentStage != DownloadStage.COMPLETED
     }
 
-    actual suspend fun getStateFile(firmwareId: String): IPlatformFile? {
+    actual suspend fun getStateFile(firmwareId: String): IPlatformFile? = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "$firmwareId.json")
-        return if (stateFile.exists()) PlatformFile(stateFile) else null
+        if (stateFile.exists()) PlatformFile(stateFile) else null
     }
 
-    actual suspend fun getAllStateFiles(): List<IPlatformFile> {
-        return downloadsDir.listFiles { _, name -> name.endsWith(".json") }
+    actual suspend fun getAllStateFiles(): List<IPlatformFile> = withContext(Dispatchers.IO) {
+        downloadsDir.listFiles { _, name -> name.endsWith(".json") }
             ?.map { PlatformFile(it) }
             ?: emptyList()
     }

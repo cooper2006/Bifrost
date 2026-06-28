@@ -69,6 +69,15 @@ import kotlin.time.ExperimentalTime
 @OptIn(ExperimentalComposeUiApi::class)
 @ExperimentalTime
 fun main() {
+    System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "debug")
+    System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
+    System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "yyyy-MM-dd HH:mm:ss.SSS")
+    System.setProperty("org.slf4j.simpleLogger.showThreadName", "false")
+
+    val logFile = java.io.File(System.getProperty("user.home"), "bifrost_debug.log")
+    System.setProperty("org.slf4j.simpleLogger.logFile", logFile.absolutePath)
+    System.setProperty("org.slf4j.simpleLogger.cacheOutputStream", "false")
+
     BugsnagUtils.create()
 
     val exceptionHandlerFactory = WindowExceptionHandlerFactory { window ->

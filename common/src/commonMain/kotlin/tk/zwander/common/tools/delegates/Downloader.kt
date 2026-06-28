@@ -105,6 +105,12 @@ object Downloader {
         }
 
         val downloadDirectory = FileManager.pickDirectory()
+        if (downloadDirectory == null) {
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+        
         // Use download directory for temp files as well to avoid path issues
         val tempDirectory = downloadDirectory
         

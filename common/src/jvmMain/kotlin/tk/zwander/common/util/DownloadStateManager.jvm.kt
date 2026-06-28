@@ -2,6 +2,8 @@ package tk.zwander.common.util
 
 import dev.zwander.kotlin.file.IPlatformFile
 import dev.zwander.kotlin.file.PlatformFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import net.harawata.appdirs.AppDirsFactory
@@ -27,33 +29,20 @@ actual object DownloadStateManager {
         dir
     }
 
-    actual suspend fun saveState(state: DownloadState) {
+    actual suspend fun saveState(state: DownloadState) = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "${state.firmwareId}.json")
         val updatedState = state.copy(lastUpdateTime = System.currentTimeMillis())
         val jsonString = json.encodeToString(updatedState)
         stateFile.writeText(jsonString)
     }
 
-    actual suspend fun loadState(firmwareId: String): DownloadState? {
+    actual suspend fun loadState(firmwareId: String): DownloadState? = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "$firmwareId.json")
-        if (!stateFile.exists()) return null
+        if (!stateFile.exists()) return@withContext null
 
-        return try {
+        try {
             val jsonString = stateFile.readText()
-            json.decodeFromString<DownloadState>(jsonString).let { state ->
-                state.copy(
-                    chunks = state.chunks.map { chunk ->
-                        ChunkState.fromStatusString(
-                            chunkId = chunk.chunkId,
-                            startByte = chunk.startByte,
-                            endByte = chunk.endByte,
-                            downloadedBytes = chunk.downloadedBytes,
-                            checksum = chunk.checksum,
-                            statusString = chunk.statusString
-                        )
-                    }
-                )
-            }
+            json.decodeFromString<DownloadState>(jsonString)
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -61,50 +50,57 @@ actual object DownloadStateManager {
     }
 
     actual suspend fun deleteState(firmwareId: String) {
-        // First load the state to get the file path before deleting
-        val state = loadState(firmwareId)
-        
-        // Then delete the state file
-        val stateFile = File(downloadsDir, "$firmwareId.json")
-        if (stateFile.exists()) {
-            stateFile.delete()
-        }
-        
-        // Also delete chunk files in download directories
-        state?.filePath?.let { filePath ->
-            val file = File(filePath)
-            // Chunk directory is at: <downloadDir>/.bifrost_chunks/<destName>_chunks/
-            file.parentFile?.let { parentDir ->
-                val chunkDir = File(parentDir, ".bifrost_chunks")
+        withContext(Dispatchers.IO) {
+            // First load the state to get the file path before deleting
+            val stateFile = File(downloadsDir, "$firmwareId.json")
+            val state = if (stateFile.exists()) {
+                try {
+                    val jsonString = stateFile.readText()
+                    json.decodeFromString<DownloadState>(jsonString)
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+
+            // Delete the state file
+            if (stateFile.exists()) {
+                stateFile.delete()
+            }
+
+            // Also delete chunk files in download directories
+            state?.filePath?.let { filePath ->
+                val file = File(filePath)
+                file.parentFile?.let { parentDir ->
+                    val chunkDir = File(parentDir, ".bifrost_chunks")
+                    if (chunkDir.exists()) {
+                        chunkDir.listFiles()?.forEach { subDir ->
+                            if (subDir.name.startsWith(file.name)) {
+                                subDir.deleteRecursively()
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also clean up in common download locations
+            listOf(
+                File(System.getProperty("user.home"), "Downloads"),
+                File(System.getProperty("user.home"))
+            ).forEach { baseDir ->
+                val chunkDir = File(baseDir, ".bifrost_chunks")
                 if (chunkDir.exists()) {
-                    // Delete the specific chunk subdirectory for this firmware
                     chunkDir.listFiles()?.forEach { subDir ->
-                        if (subDir.name.startsWith(file.name)) {
+                        if (subDir.name.contains(firmwareId)) {
                             subDir.deleteRecursively()
                         }
                     }
                 }
             }
         }
-        
-        // Also clean up in common download locations
-        listOf(
-            File(System.getProperty("user.home"), "Downloads"),
-            File(System.getProperty("user.home"))
-        ).forEach { baseDir ->
-            val chunkDir = File(baseDir, ".bifrost_chunks")
-            if (chunkDir.exists()) {
-                chunkDir.listFiles()?.forEach { subDir ->
-                    if (subDir.name.contains(firmwareId)) {
-                        subDir.deleteRecursively()
-                    }
-                }
-            }
-        }
     }
 
-    actual suspend fun getIncompleteDownloads(): List<DownloadState> {
-        return getAllStateFiles().mapNotNull { file ->
+    actual suspend fun getIncompleteDownloads(): List<DownloadState> = withContext(Dispatchers.IO) {
+        getAllStateFiles().mapNotNull { file ->
             try {
                 val state = loadState(file.getName().removeSuffix(".json"))
                 state?.takeIf { it.currentStage != DownloadStage.COMPLETED }
@@ -114,18 +110,18 @@ actual object DownloadStateManager {
         }
     }
 
-    actual suspend fun hasResumableDownload(firmwareId: String): Boolean {
+    actual suspend fun hasResumableDownload(firmwareId: String): Boolean = withContext(Dispatchers.IO) {
         val state = loadState(firmwareId)
-        return state != null && state.currentStage != DownloadStage.COMPLETED
+        state != null && state.currentStage != DownloadStage.COMPLETED
     }
 
-    actual suspend fun getStateFile(firmwareId: String): IPlatformFile? {
+    actual suspend fun getStateFile(firmwareId: String): IPlatformFile? = withContext(Dispatchers.IO) {
         val stateFile = File(downloadsDir, "$firmwareId.json")
-        return if (stateFile.exists()) PlatformFile(stateFile) else null
+        if (stateFile.exists()) PlatformFile(stateFile) else null
     }
 
-    actual suspend fun getAllStateFiles(): List<IPlatformFile> {
-        return downloadsDir.listFiles { _, name -> name.endsWith(".json") }
+    actual suspend fun getAllStateFiles(): List<IPlatformFile> = withContext(Dispatchers.IO) {
+        downloadsDir.listFiles { _, name -> name.endsWith(".json") }
             ?.map { PlatformFile(it) }
             ?: emptyList()
     }

@@ -22,6 +22,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.core.toByteArray
+import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.io.Source
 import kotlinx.io.Sink
 import org.slf4j.LoggerFactory
@@ -149,11 +151,15 @@ object FusClient {
      * @return the response body data, as text. Usually XML.
      */
     suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
-        val currentNonce = stateMutex.withLock {
-            if (currentState.nonce.isBlank() && request != Request.GENERATE_NONCE) {
+        if (request != Request.GENERATE_NONCE) {
+            val nonceBlank = stateMutex.withLock { currentState.nonce.isBlank() }
+            if (nonceBlank) {
                 generateNonce()
             }
-            currentState.nonce
+        }
+
+        val (currentNonce, currentSessionId) = stateMutex.withLock {
+            currentState.nonce to currentState.sessionId
         }
 
         val authV = getAuthV(cloud = request.cloud, signature = signature)
@@ -164,9 +170,8 @@ object FusClient {
                 headers {
                     append("Authorization", authV)
                     append("User-Agent", "SMART 2.0")
-                    val sessionId = stateMutex.withLock { currentState.sessionId }
-                    append("Cookie", "JSESSIONID=$sessionId;SESSION=$sessionId")
-                    append("Set-Cookie", "JSESSIONID=$sessionId;SESSION=$sessionId")
+                    append("Cookie", "JSESSIONID=$currentSessionId;SESSION=$currentSessionId")
+                    append("Set-Cookie", "JSESSIONID=$currentSessionId;SESSION=$currentSessionId")
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
@@ -580,10 +585,10 @@ object FusClient {
         chunks: List<ChunkState>,
         chunkFileProvider: (Int) -> IPlatformFile?,
         dest: IPlatformFile,
-    ): Boolean {
-        val outputStream = dest.openOutputStream(false) ?: return false
+    ): Boolean = withContext(Dispatchers.IO) {
+        val outputStream = dest.openOutputStream(false) ?: return@withContext false
 
-        return try {
+        try {
             val buffer = ByteArray(DEFAULT_CHUNK_SIZE)
             var totalMerged = 0L
             for (chunk in chunks.sortedBy { it.chunkId }) {
@@ -705,27 +710,49 @@ object FusClient {
 
         val localStateMutex = Mutex()
         var currentState = initialState
-        var totalDownloaded = initialState.downloadedBytes
+        val totalDownloaded = atomic(initialState.downloadedBytes)
         val startTime = System.nanoTime()
-        var lastSaveBytes = totalDownloaded
+        var lastSaveBytes = totalDownloaded.value
+        val progressUpdateMutex = Mutex()
+        var lastProgressUpdateTime = 0L
+        val minProgressUpdateIntervalMs = 500L
 
         suspend fun updateProgress() {
-            val elapsed = (System.nanoTime() - startTime) / 1_000_000.0
-            val bps = if (elapsed > 0) (totalDownloaded * 1000.0 / elapsed).toLong() else 0L
-            progressCallback(totalDownloaded, size, bps)
+            val now = System.currentTimeMillis()
+            if (now - lastProgressUpdateTime < minProgressUpdateIntervalMs) {
+                return
+            }
+
+            if (progressUpdateMutex.tryLock()) {
+                try {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastProgressUpdateTime < minProgressUpdateIntervalMs) {
+                        return
+                    }
+                    lastProgressUpdateTime = currentTime
+
+                    val elapsed = (System.nanoTime() - startTime) / 1_000_000.0
+                    val currentDownloaded = totalDownloaded.value
+                    val bps = if (elapsed > 0) (currentDownloaded * 1000.0 / elapsed).toLong() else 0L
+                    progressCallback(currentDownloaded, size, bps)
+                } finally {
+                    progressUpdateMutex.unlock()
+                }
+            }
         }
 
         suspend fun saveProgressIfNeeded() {
-            if (totalDownloaded - lastSaveBytes >= ProgressUpdateInterval) {
+            val currentDownloaded = totalDownloaded.value
+            if (currentDownloaded - lastSaveBytes >= ProgressUpdateInterval) {
                 localStateMutex.withLock {
                     DownloadStateManager.saveState(currentState)
                 }
-                lastSaveBytes = totalDownloaded
+                lastSaveBytes = totalDownloaded.value
             }
         }
 
         suspend fun onChunkProgress(chunkId: Int, bytesDelta: Long) {
-            totalDownloaded += bytesDelta
+            totalDownloaded.addAndGet(bytesDelta)
             localStateMutex.withLock {
                 val chunks = currentState.chunks.toMutableList()
                 val chunkIndex = chunks.indexOfFirst { it.chunkId == chunkId }
@@ -733,7 +760,7 @@ object FusClient {
                     val chunk = chunks[chunkIndex]
                     chunks[chunkIndex] = chunk.copy(downloadedBytes = chunk.downloadedBytes + bytesDelta)
                     currentState = currentState.copy(
-                        downloadedBytes = totalDownloaded,
+                        downloadedBytes = totalDownloaded.value,
                         chunks = chunks,
                         lastUpdateTime = System.currentTimeMillis(),
                     )

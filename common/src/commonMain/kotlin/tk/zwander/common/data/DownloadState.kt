@@ -2,6 +2,7 @@ package tk.zwander.common.data
 
 import kotlinx.serialization.Serializable
 
+@Serializable
 enum class DownloadStage {
     DOWNLOADING,
     CRC_CHECKING,
@@ -11,6 +12,7 @@ enum class DownloadStage {
     FAILED,
 }
 
+@Serializable
 enum class ChunkStatus {
     PENDING,
     DOWNLOADING,
@@ -25,7 +27,6 @@ data class ChunkState(
     val endByte: Long,
     val downloadedBytes: Long = 0L,
     val checksum: String? = null,
-    @kotlinx.serialization.Transient
     val status: ChunkStatus = ChunkStatus.PENDING,
 ) {
     val statusString: String

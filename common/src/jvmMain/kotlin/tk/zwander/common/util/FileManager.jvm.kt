@@ -6,8 +6,11 @@ import io.github.vinceglb.filekit.FileKit
 import io.github.vinceglb.filekit.dialogs.openDirectoryPicker
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import io.github.vinceglb.filekit.dialogs.openFileSaver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.swing.JFileChooser
+import javax.swing.SwingUtilities
 import javax.swing.filechooser.FileSystemView
 
 actual object FileManager {
@@ -16,21 +19,17 @@ actual object FileManager {
     }
 
     actual suspend fun pickDirectory(): IPlatformFile? {
-        val chooser = JFileChooser(FileSystemView.getFileSystemView())
-        chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-        chooser.isMultiSelectionEnabled = false
-        
-        val result = chooser.showOpenDialog(null)
-        
-        return if (result == JFileChooser.APPROVE_OPTION) {
-            val selectedFile = chooser.selectedFile
-            if (selectedFile != null) {
-                PlatformFile(selectedFile)
+        return withContext(Dispatchers.Main) {
+            val chooser = JFileChooser(FileSystemView.getFileSystemView())
+            chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+            chooser.isMultiSelectionEnabled = false
+            
+            val result = chooser.showOpenDialog(null)
+            if (result == JFileChooser.APPROVE_OPTION) {
+                PlatformFile(chooser.selectedFile)
             } else {
                 null
             }
-        } else {
-            null
         }
     }
 

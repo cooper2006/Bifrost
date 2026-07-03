@@ -61,7 +61,7 @@ Release notes are available in [CHANGELOG.md](CHANGELOG.md).
 # FAQ & Troubleshooting
 
 ## Bifrost isn't downloading watch firmware.
-Unfortunately, Samsung doesn't serve the full firmware files for watches, so Bifrost can't download them.
+Starting with v2.0.0, Bifrost can download most watch firmware. However, some regions/CSCs may not have firmware available. If you see an error, try a different region/CSC.
 
 ## Bifrost is returning error 400/401 when downloading
 These errors are on Samsung's end. If you can, try using a different region/CSC.
@@ -102,6 +102,23 @@ Bifrost (the malware) only affects Windows systems and has limited functionality
 
 Bifrost (this app) does not contain malware. You can verify this by browsing through the source code or by compiling it yourself using the instructions below.
 
+
+## Bifrost freezes or becomes unresponsive when clicking Download or Check for Updates.
+This was caused by a coroutine deadlock in the download client, which has been fixed in recent versions. If you're still experiencing freezes, make sure you're running the latest version of Bifrost.
+
+## How do I view debug logs?
+Bifrost logs debug information to ~/bifrost_debug.log on desktop platforms. You can enable more verbose logging by setting the SLF4J log level in the application settings or by launching with the appropriate JVM arguments.
+
+## What does "Chunks: X/Y" mean in the download progress?
+During firmware downloads, large files are split into smaller chunks that are downloaded in parallel for faster speeds. "Chunks: X/Y" shows how many of the total chunks have been successfully downloaded. For example, "Chunks: 3/5" means 3 out of 5 chunks are complete.
+
+## Can I pause and resume downloads?
+Yes! Starting from the latest version, you can pause a download at any time by clicking the pause button (⏸) in the download interface. To resume, click the resume button (▶). You can also pause/resume from the command line.
+
+## What happens if my download is interrupted?
+Bifrost supports resumable downloads. If a download is interrupted (due to network issues, app closure, etc.), you can resume it from where it left off. On startup, Bifrost will detect any incomplete downloads and offer to resume them.
+
+## Why is my antivirus flagging the app?
 # Building
 Building this project should be fairly easy.
 

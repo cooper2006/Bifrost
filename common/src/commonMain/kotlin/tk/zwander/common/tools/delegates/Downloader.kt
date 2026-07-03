@@ -608,6 +608,6 @@ object Downloader {
         model.fw.value = fw
         model.osCode.value = os
 
-        model.endJob("")
+        model.endJob(MR.strings.done())
     }
 }

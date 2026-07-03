@@ -20,11 +20,11 @@ UI (DownloadView)        DownloadModel        Downloader           Request      
      |                       |                      |                   |                  |<-- 200 OK ----------|                  |                    |
      |                       |                      |                   |                  |                    |                  |                    |
      |                       |                      |                   |                  |-- downloadFile() -->|                  |                    |
-     |                       |                      |                   |                  |                    |-- split into 8 chunks |                    |
+     |                       |                      |                   |                  |                    |-- split into 4 chunks |                    |
      |                       |                      |                   |                  |                    |-- GET Range:0-XXXXX--->|                    |
      |                       |                      |                   |                  |                    |-- GET Range:XXXX-XXXX->|                    |
-     |                       |                      |                   |                  |                    |-- ... 6 more parallel requests              |
-     |                       |                      |                   |                  |                    |<-- 206 Partial Content (8x)  |
+     |                       |                      |                   |                  |                    |-- ... 2 more parallel requests              |
+     |                       |                      |                   |                  |                    |<-- 206 Partial Content (4x)  |
      |                       |                      |                   |                  |                    |-- write to chunk temp files     |
      |                       |                      |                   |                  |                    |<-- progress callbacks --------|
      |                       |                      |                   |                  |                    |-- concatenate chunks ----->|
@@ -54,7 +54,7 @@ UI (DownloadView)        DownloadModel        Downloader           Request      
 |------|------|
 | 1. BinaryFileInfo 获取 | 通过 BINARY_INFORM 请求获取固件信息（文件名、大小、CRC32、v4Key） |
 | 2. BINARY_INIT 认证 | 向 FUS 服务器发起初始化认证，获取 session |
-| 3. 多线程下载 | 将文件按 8 路分片，每片独立 Range 请求，并行下载到临时文件 |
+| 3. 分块下载 | 将文件按 4 路分片，每片独立 Range 请求，并行下载到临时文件。大文件自动分块（50MB-4GB），支持断点续传 |
 | 4. CRC32 校验 | 解密前校验加密文件的 CRC32 |
 | 5. MD5 校验 | 校验文件 Content-MD5（来自 HTTP 头） |
 | 6. 文件复制 | 如果 tempDirectory != downloadDirectory，复制到目标目录 |

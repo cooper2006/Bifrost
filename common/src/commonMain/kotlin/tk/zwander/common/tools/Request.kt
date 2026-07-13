@@ -23,6 +23,7 @@ import tk.zwander.common.util.invoke
 import tk.zwander.common.util.isAccessoryModel
 import tk.zwander.common.util.textNode
 import tk.zwander.samloaderkotlin.resources.MR
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.ExperimentalTime
 
 /**
@@ -63,7 +64,7 @@ object Request {
             latestRequest = createBinaryInform(fw, model, region, FusClient.getNonce())
 
             if (index % 10 == 0) {
-                delay(1000)
+                delay(1000.milliseconds)
             }
 
             latestResult = try {

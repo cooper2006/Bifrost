@@ -9,6 +9,7 @@ import oshi.SystemInfo
 import tk.zwander.common.GradleConfig
 import java.lang.reflect.Proxy
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedDeque
 
 data class Breadcrumb(
     val time: Long,
@@ -22,7 +23,7 @@ actual object BugsnagUtils {
     val bugsnag by lazy { Bugsnag(GradleConfig.bugsnagJvmApiKey) }
     val oshiSystemInfo by lazy { SystemInfo() }
 
-    private val breadcrumbs = LinkedHashMap<Long, Breadcrumb>()
+    private val breadcrumbs = ConcurrentLinkedDeque<Pair<Long, Breadcrumb>>()
 
     @Suppress("UNCHECKED_CAST")
     fun create() {
@@ -110,11 +111,13 @@ actual object BugsnagUtils {
     ) {
         val time = System.currentTimeMillis()
 
-        breadcrumbs[time] = Breadcrumb(
-            time = time,
-            message = message,
-            data = data,
-            type = type,
+        breadcrumbs.add(
+            time to Breadcrumb(
+                time = time,
+                message = message,
+                data = data,
+                type = type,
+            ),
         )
     }
 }

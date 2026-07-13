@@ -284,31 +284,39 @@ afterEvaluate {
     val versionName: String = rootProject.extra["versionName"] as String
     val versionCode: Int = rootProject.extra["versionCode"] as Int
 
-    try {
-        providers.exec {
-            commandLine(
-                "plutil",
-                "-replace",
-                "CFBundleShortVersionString",
-                "-string",
-                versionName,
-                "../iosApp/iosApp/Info.plist",
-            )
-        }
-    } catch (_: Throwable) {
+    val setVersionName = providers.exec {
+        isIgnoreExitValue = true
+
+        commandLine(
+            "/usr/bin/plutil",
+            "-replace",
+            "CFBundleShortVersionString",
+            "-string",
+            versionName,
+            "${rootProject.layout.projectDirectory.asFile.absolutePath}/iosApp/iosApp/Info.plist",
+        )
     }
 
-    try {
-        providers.exec {
-            commandLine(
-                "plutil",
-                "-replace",
-                "CFBundleVersion",
-                "-string",
-                "$versionCode",
-                "../iosApp/iosApp/Info.plist",
-            )
-        }
-    } catch (_: Throwable) {
+    val setVersionCode = providers.exec {
+        isIgnoreExitValue = true
+
+        commandLine(
+            "/usr/bin/plutil",
+            "-replace",
+            "CFBundleVersion",
+            "-string",
+            "$versionCode",
+            "${rootProject.layout.projectDirectory.asFile.absolutePath}/iosApp/iosApp/Info.plist",
+        )
+    }
+
+    setVersionName.result.get()
+    setVersionCode.result.get()
+
+    setVersionName.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+        println(it)
+    }
+    setVersionCode.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+        println(it)
     }
 }

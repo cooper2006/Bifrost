@@ -1,6 +1,6 @@
 PODS:
   - BugsnagPerformance (1.14.0)
-  - common (93)
+  - common (94)
 
 DEPENDENCIES:
   - BugsnagPerformance
@@ -16,7 +16,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   BugsnagPerformance: 1ce529b5ade51e2048019850fd0f8da5bcb8ee39
-  common: 301ff4a5be9ba2206294821063e196c65365b321
+  common: f6144569367bbd34f350b909b2ae571ba8cfccc1
 
 PODFILE CHECKSUM: 000b91682bffe8883f1f0a58c28b251dc5538a59
 

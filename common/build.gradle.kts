@@ -310,13 +310,15 @@ afterEvaluate {
         )
     }
 
-    setVersionName.result.get()
-    setVersionCode.result.get()
+    try {
+        setVersionName.result.get()
+        setVersionCode.result.get()
 
-    setVersionName.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
-        println(it)
-    }
-    setVersionCode.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
-        println(it)
-    }
+        setVersionName.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+            println(it)
+        }
+        setVersionCode.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+            println(it)
+        }
+    } catch (_: Throwable) {}
 }

@@ -140,13 +140,13 @@ internal fun DecryptView() {
             MRFLayout(model, canChangeOption, canChangeOption)
 
             SplitComponent(
-                startComponent = {
+                startComponent = { modifier ->
                     val value = fileToDecrypt?.encFile?.getAbsolutePath() ?: ""
                     OutlinedTextField(
                         value = value,
                         onValueChange = {},
                         label = { Text(text = stringResource(MR.strings.file)) },
-                        modifier = Modifier
+                        modifier = modifier
                             .handleFileDrag {
                                 if (it != null) {
                                     scope.launch {
@@ -167,7 +167,7 @@ internal fun DecryptView() {
                         visualTransformation = OffsetCorrectedIdentityTransformation(value),
                     )
                 },
-                endComponent = {
+                endComponent = { modifier ->
                     OutlinedTextField(
                         value = decryptKey,
                         onValueChange = { decryptKey = it },
@@ -183,6 +183,7 @@ internal fun DecryptView() {
                                 )
                             }
                         },
+                        modifier = modifier,
                     )
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),

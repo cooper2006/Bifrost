@@ -56,7 +56,7 @@ internal fun MRFLayout(
     val hasRunningJobs by model.hasRunningJobs.collectAsState(false)
 
     SplitComponent(
-        startComponent = {
+        startComponent = { modifier ->
             OutlinedTextField(
                 value = modelState,
                 onValueChange = {
@@ -66,7 +66,7 @@ internal fun MRFLayout(
                         model.osCode.value = ""
                     }
                 },
-                modifier = Modifier,
+                modifier = modifier,
                 label = { Text(text = stringResource(MR.strings.modelHint)) },
                 readOnly = !canChangeOption,
                 keyboardOptions = KeyboardOptions(KeyboardCapitalization.Characters),
@@ -74,7 +74,7 @@ internal fun MRFLayout(
                 visualTransformation = OffsetCorrectedIdentityTransformation(modelState),
             )
         },
-        endComponent = {
+        endComponent = { modifier ->
             OutlinedTextField(
                 value = regionState,
                 onValueChange = {
@@ -84,7 +84,7 @@ internal fun MRFLayout(
                         model.osCode.value = ""
                     }
                 },
-                modifier = Modifier,
+                modifier = modifier,
                 label = { Text(text = stringResource(MR.strings.regionHint)) },
                 readOnly = !canChangeOption,
                 keyboardOptions = KeyboardOptions(KeyboardCapitalization.Characters),
@@ -142,10 +142,10 @@ internal fun MRFLayout(
 
             SplitComponent(
                 startComponent = {
-                    first.Render()
+                    first.Render(it)
                 },
                 endComponent = {
-                    second.Render()
+                    second.Render(it)
                 },
                 startRatio = 0.6,
                 endRatio = 0.4,

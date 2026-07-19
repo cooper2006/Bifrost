@@ -3,7 +3,6 @@
 package tk.zwander.common.tools
 
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
-import com.fleeksoft.ksoup.Ksoup
 import com.linroid.ketch.api.Destination
 import com.linroid.ketch.api.DownloadRequest
 import com.linroid.ketch.api.DownloadState
@@ -16,7 +15,6 @@ import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -31,15 +29,14 @@ import kotlinx.coroutines.launch
 import kotlinx.io.InternalIoApi
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
-import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.ketch
 
 /**
  * Manage communications with Samsung's server.
  */
-object FusClient {
-    enum class Request(val value: String, val cloud: Boolean) {
+object FusClient : IFusClient<FusClient.Request> {
+    enum class Request(val value: String, val cloud: Boolean) : IFusClient.IRequest {
         GENERATE_NONCE("NF_SmartDownloadGenerateNonce.do", false),
         BINARY_INFORM("NF_SmartDownloadBinaryInform.do", false),
         BINARY_INIT("NF_SmartDownloadBinaryInitForMass.do", false),
@@ -51,7 +48,7 @@ object FusClient {
     private var auth: String = ""
     private var sessionId: String = ""
 
-    suspend fun getNonce(): String {
+    override suspend fun getNonce(): String {
         if (nonce.isBlank()) {
             generateNonce()
         }
@@ -59,7 +56,7 @@ object FusClient {
         return nonce
     }
 
-    private suspend fun generateNonce() {
+    override suspend fun generateNonce() {
         BugsnagUtils.addBreadcrumb(
             message = "Generating nonce.",
             data = mapOf(),
@@ -86,7 +83,7 @@ object FusClient {
         return hasher.hash("$a:FUS:$b".toByteArray()).toHexString()
     }
 
-    private suspend fun getAuthV(includeNonce: Boolean = true, signature: String? = null, cloud: Boolean = false): String {
+    override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
         val hasSignature = !signature.isNullOrBlank()
         val nonce = when {
             includeNonce && hasSignature -> {
@@ -103,7 +100,7 @@ object FusClient {
                 "realm=\"${if (hasSignature) "interface" else ""}\""
     }
 
-    private fun getDownloadUrl(path: String): String {
+    override suspend fun getDownloadUrl(path: String): String {
         return "http://cloud-neofussvr.samsungmobile.com/NF_SmartDownloadBinaryForMass.do?file=${path}"
     }
 
@@ -113,7 +110,7 @@ object FusClient {
      * @param data any body data that needs to go into the request.
      * @return the response body data, as text. Usually XML.
      */
-    suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
+    override suspend fun makeReq(request: Request, data: String, signature: String?, includeNonce: Boolean): String {
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
             generateNonce()
         }
@@ -182,9 +179,9 @@ object FusClient {
      * @param start an optional offset. Used for resuming downloads.
      */
     @OptIn(InternalAPI::class, InternalIoApi::class)
-    suspend fun downloadFile(
+    override suspend fun downloadFile(
         fileName: String,
-        start: Long = 0,
+        start: Long,
         size: Long,
         dest: IPlatformFile,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
@@ -262,27 +259,5 @@ object FusClient {
         }
 
         return md5
-    }
-
-    private fun HttpResponse.is401(body: String): Boolean {
-        if (status.value == 401) {
-            return true
-        }
-
-        try {
-            val xml = Ksoup.parse(body)
-
-            val status = xml.firstElementByTagName("FUSBody")
-                ?.firstElementByTagName("Results")
-                ?.firstElementByTagName("Status")
-                ?.text()
-
-            if (status == "401") {
-                return true
-            }
-        } catch (_: Throwable) {
-        }
-
-        return false
     }
 }

@@ -7,6 +7,8 @@ import kotlinx.coroutines.withContext
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.FusClient
+import tk.zwander.common.tools.FusClientLegacy
+import tk.zwander.common.tools.IFusClient
 import tk.zwander.common.tools.Request
 import tk.zwander.common.tools.VersionFetch
 import tk.zwander.common.util.BifrostSettings
@@ -39,6 +41,41 @@ object Downloader {
         model: DownloadModel,
         confirmCallback: DownloadErrorCallback,
     ) {
+        val standard = onDownload(
+            model = model,
+            confirmCallback = confirmCallback,
+            legacy = false,
+            onFinish = { error, message ->
+                if (!error) {
+                    model.endJob(message)
+                    eventManager.sendEvent(Event.Download.Finish)
+                    return@onDownload
+                }
+            },
+        )
+
+        if (standard) {
+            return
+        }
+
+        // Legacy fallback
+        onDownload(
+            model = model,
+            confirmCallback = confirmCallback,
+            legacy = true,
+            onFinish = { _, message ->
+                model.endJob(message)
+                eventManager.sendEvent(Event.Download.Finish)
+            },
+        )
+    }
+
+    suspend fun onDownload(
+        model: DownloadModel,
+        confirmCallback: DownloadErrorCallback,
+        legacy: Boolean,
+        onFinish: suspend (error: Boolean, message: String) -> Unit,
+    ): Boolean {
         eventManager.sendEvent(Event.Download.Start)
         model.statusText.value = MR.strings.downloading()
 
@@ -52,38 +89,64 @@ object Downloader {
                         message = exception.message!!,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(info!!, model)
+                                performDownload(
+                                    info = info!!,
+                                    model = model,
+                                    legacy = legacy,
+                                    onFinish = onFinish,
+                                )
                             },
                             onCancel = {
-                                model.endJob("")
-                                eventManager.sendEvent(Event.Download.Finish)
+                                onFinish(false, "")
                             },
                         )
                     ),
                 )
             },
-            onFinish = {
-                model.endJob(it)
-                eventManager.sendEvent(Event.Download.Finish)
+            onErrorFinish = {
+                onFinish(true, it)
             },
             shouldReportError = {
                 !model.manual.value
             },
-            imeiSerial = "",
+            imeiSerial = model.imeiSerial.value,
+            legacy = legacy,
         )
 
-        if (info != null) {
-            performDownload(info, model)
+        return if (info != null) {
+            performDownload(info = info, model = model, legacy = legacy, onFinish = onFinish)
+            true
+        } else {
+            false
         }
     }
 
     @OptIn(ExperimentalTime::class)
-    private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
+    private suspend fun performDownload(
+        info: BinaryFileInfo,
+        model: DownloadModel,
+        legacy: Boolean,
+        onFinish: suspend (error: Boolean, message: String) -> Unit,
+    ) {
         try {
             val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
-            val request = Request.createBinaryInit(fileName, FusClient.getNonce(), fwVer, modelType, model.region.value)
+            val request = Request.createBinaryInit(
+                fileName = fileName,
+                nonce = IFusClient.getNonce(legacy),
+                fw = fwVer,
+                modelType = modelType,
+                region = model.region.value,
+                legacy = legacy,
+            )
 
-            FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
+            IFusClient.selectClientAndMakeRequest(
+                request = if (legacy) {
+                    FusClientLegacy.Request.BINARY_INIT
+                } else {
+                    FusClient.Request.BINARY_INIT
+                },
+                data = request,
+            )
 
             val fullFileName = fileName.replace(
                 ".zip",
@@ -100,11 +163,11 @@ object Downloader {
             val tempDirectory = FileManager.getTempDirectory()
 
             val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
-                model.endJob("")
+                onFinish(false, "")
                 return
             }
             val extractedEncFile = downloadDirectory?.child(fullFileName, false) ?: run {
-                model.endJob("")
+                onFinish(false, "")
                 return
             }
             val decFile = downloadDirectory.child(
@@ -135,11 +198,12 @@ object Downloader {
             }
 
             val md5 = if (extractedEncFile.getLength() < size) {
-                FusClient.downloadFile(
+                IFusClient.downloadFile(
                     fileName = path + fileName,
                     start = encFile.getLength(),
                     size = size,
                     dest = encFile,
+                    legacy = legacy,
                 ) { current, max, bps ->
                     model.progress.value = current to max
                     model.speed.value = bps

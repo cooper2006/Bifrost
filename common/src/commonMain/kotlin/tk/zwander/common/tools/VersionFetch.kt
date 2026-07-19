@@ -152,7 +152,7 @@ object VersionFetch {
     ): Document {
         val requestContent = createHistoryRequest(model, region)
 
-        val response = FusClient.makeReq(
+        val response = IFusClient.selectClientAndMakeRequest(
             request = FusClient.Request.HISTORY,
             data = requestContent,
             signature = model,

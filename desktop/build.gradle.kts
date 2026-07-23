@@ -76,7 +76,11 @@ compose.desktop {
             "-Dorg.slf4j.simpleLogger.showDateTime=true",
             "-Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss.SSS",
             "-Dorg.slf4j.simpleLogger.showThreadName=false",
-            "-Dorg.slf4j.simpleLogger.cacheOutputStream=false"
+            "-Dorg.slf4j.simpleLogger.cacheOutputStream=false",
+            "-Dorg.slf4j.simpleLogger.logFile=/tmp/bifrost_home/bifrost_debug.log",
+            "-Dskiko.library.path=/tmp/skiko",
+            "-Djava.io.tmpdir=/tmp",
+            "-Duser.home=/tmp/bifrost_home"
         )
         
         nativeDistributions {

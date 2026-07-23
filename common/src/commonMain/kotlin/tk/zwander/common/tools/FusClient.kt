@@ -6,7 +6,6 @@ import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
 import com.fleeksoft.ksoup.Ksoup
 import com.linroid.ketch.api.Destination
 import com.linroid.ketch.api.DownloadRequest
-import com.linroid.ketch.api.DownloadState
 import com.linroid.ketch.api.KetchError
 import dev.zwander.kotlin.file.IPlatformFile
 import io.github.andreypfau.kotlinx.crypto.CRC32
@@ -932,7 +931,7 @@ object FusClient : IFusClient<FusClient.Request> {
      */
     @OptIn(InternalAPI::class, InternalIoApi::class)
     @Deprecated("Use downloadFileChunked for resumable download support")
-    override suspend fun downloadFile(
+    suspend fun downloadFile(
         fileName: String,
         start: Long = 0,
         size: Long,
@@ -976,7 +975,7 @@ object FusClient : IFusClient<FusClient.Request> {
             else -> false
         }
     }
-    private fun HttpResponse.is401(body: String): Boolean {
+    override fun HttpResponse.is401(body: String): Boolean {
         if (status.value == 401) {
             return true
         }

@@ -1,18 +1,18 @@
-val versionCode by extra(93)
-val versionName by extra("2.1.2")
+extra["versionCode"] = 94
+extra["versionName"] = "2.1.3"
 
-val compileSdk by extra(37)
-val targetSdk by extra(36)
-val minSdk by extra(26)
+extra["compileSdk"] = 37
+extra["targetSdk"] = 36
+extra["minSdk"] = 26
 
-val javaVersionEnum by extra(JavaVersion.VERSION_21)
+extra["javaVersionEnum"] = JavaVersion.VERSION_21
 
-val groupName by extra("tk.zwander")
-val packageName by extra("tk.zwander.samsungfirmwaredownloader")
-val appName by extra("Bifrost")
+extra["groupName"] = "tk.zwander"
+extra["packageName"] = "tk.zwander.samsungfirmwaredownloader"
+extra["appName"] = "Bifrost"
 
-val bugsnagJvmApiKey by extra("a5b9774e86bc615c2e49a572b8313489")
-val bugsnagAndroidApiKey by extra("3e0ed592029da1d5cc9b52160ef702ea")
+extra["bugsnagJvmApiKey"] = "a5b9774e86bc615c2e49a572b8313489"
+extra["bugsnagAndroidApiKey"] = "3e0ed592029da1d5cc9b52160ef702ea"
 
 plugins {
     alias(libs.plugins.android.application) apply false
@@ -37,5 +37,5 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     }
 }
 
-group = groupName
-version = versionName
+group = extra["groupName"].toString()
+version = extra["versionName"].toString()

@@ -4,6 +4,9 @@ package tk.zwander.common.tools
 
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
 import com.fleeksoft.ksoup.Ksoup
+import com.linroid.ketch.api.Destination
+import com.linroid.ketch.api.DownloadRequest
+import com.linroid.ketch.api.DownloadState
 import com.linroid.ketch.api.KetchError
 import dev.zwander.kotlin.file.IPlatformFile
 import io.github.andreypfau.kotlinx.crypto.CRC32
@@ -21,6 +24,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.readAvailable
+import kotlinx.io.InternalIoApi
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CancellationException
@@ -61,8 +65,8 @@ private val logger = LoggerFactory.getLogger("FusClient")
 /**
  * Manage communications with Samsung's server.
  */
-object FusClient {
-    enum class Request(val value: String, val cloud: Boolean) {
+object FusClient : IFusClient<FusClient.Request> {
+    enum class Request(val value: String, val cloud: Boolean) : IFusClient.IRequest {
         GENERATE_NONCE("NF_SmartDownloadGenerateNonce.do", false),
         BINARY_INFORM("NF_SmartDownloadBinaryInform.do", false),
         BINARY_INIT("NF_SmartDownloadBinaryInitForMass.do", false),
@@ -81,7 +85,7 @@ object FusClient {
     private val stateMutex = Mutex()
     private var currentState = ClientState()
 
-    suspend fun getNonce(): String {
+    override suspend fun getNonce(): String {
         return stateMutex.withLock {
             if (currentState.nonce.isBlank()) {
                 generateNonce()
@@ -94,7 +98,7 @@ object FusClient {
         generateNonce()
     }
 
-    private suspend fun generateNonce() {
+    override suspend fun generateNonce() {
         BugsnagUtils.addBreadcrumb(
             message = "Generating nonce.",
             data = mapOf(),
@@ -119,7 +123,7 @@ object FusClient {
         return hasher.hash("$a:FUS:$b".toByteArray()).toHexString()
     }
 
-    private suspend fun getAuthV(includeNonce: Boolean = true, signature: String? = null, cloud: Boolean = false): String {
+    override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
         val hasSignature = !signature.isNullOrBlank()
         val (nonceValue, currentAuth) = stateMutex.withLock {
             val nonceVal = when {
@@ -140,7 +144,7 @@ object FusClient {
                 "realm=\"${if (hasSignature) "interface" else ""}\""
     }
 
-    private fun getDownloadUrl(path: String): String {
+    override suspend fun getDownloadUrl(path: String): String {
         return "http://cloud-neofussvr.samsungmobile.com/NF_SmartDownloadBinaryForMass.do?file=${path}"
     }
 
@@ -150,7 +154,7 @@ object FusClient {
      * @param data any body data that needs to go into the request.
      * @return the response body data, as text. Usually XML.
      */
-    suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
+    override suspend fun makeReq(request: Request, data: String, signature: String?, includeNonce: Boolean): String {
         if (request != Request.GENERATE_NONCE) {
             val nonceBlank = stateMutex.withLock { currentState.nonce.isBlank() }
             if (nonceBlank) {
@@ -926,9 +930,9 @@ object FusClient {
      * @param isPaused callback to check if download should pause.
      * @param progressCallback reports (current, max, bps) during download.
      */
-    @OptIn(InternalAPI::class)
+    @OptIn(InternalAPI::class, InternalIoApi::class)
     @Deprecated("Use downloadFileChunked for resumable download support")
-    suspend fun downloadFile(
+    override suspend fun downloadFile(
         fileName: String,
         start: Long = 0,
         size: Long,
@@ -972,7 +976,6 @@ object FusClient {
             else -> false
         }
     }
-
     private fun HttpResponse.is401(body: String): Boolean {
         if (status.value == 401) {
             return true

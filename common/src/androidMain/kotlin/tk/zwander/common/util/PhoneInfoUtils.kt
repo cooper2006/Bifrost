@@ -34,7 +34,7 @@ fun rememberPhoneInfo(): PhoneInfo? {
         context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
     }
     val permissionRequester = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { result ->
-        permissionContinuation?.resume(if (result) telephonyManager.imei?.slice(0..7) else null)
+        permissionContinuation?.resume(if (result) telephonyManager.imei?.takeIf { it.length >= 8 }?.slice(0..7) else null)
         permissionContinuation = null
     }
 

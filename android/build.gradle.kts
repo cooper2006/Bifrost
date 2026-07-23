@@ -16,24 +16,17 @@ dependencies {
 }
 
 android {
-    val compileSdk: Int by rootProject.extra
-    val packageName: String by rootProject.extra
-
-    this.compileSdk = compileSdk
+    val packageName = rootProject.extra["packageName"].toString()
+    this.compileSdk = rootProject.extra["compileSdk"].toString().toInt()
 
     defaultConfig {
         applicationId = packageName
 
-        val minSdk: Int by rootProject.extra
-        val targetSdk: Int by rootProject.extra
-        val versionCode: Int by rootProject.extra
-        val versionName: String by rootProject.extra
+        this.minSdk = rootProject.extra["minSdk"].toString().toInt()
+        this.targetSdk = rootProject.extra["targetSdk"].toString().toInt()
 
-        this.minSdk = minSdk
-        this.targetSdk = targetSdk
-
-        this.versionCode = versionCode
-        this.versionName = versionName
+        this.versionCode = rootProject.extra["versionCode"].toString().toInt()
+        this.versionName = rootProject.extra["versionName"].toString()
 
         resValue("string", "app_name", "${rootProject.extra["appName"]}")
     }
@@ -58,7 +51,7 @@ android {
     }
 
     compileOptions {
-        val javaVersionEnum: JavaVersion by rootProject.extra
+        val javaVersionEnum = rootProject.extra["javaVersionEnum"] as JavaVersion
         sourceCompatibility = javaVersionEnum
         targetCompatibility = javaVersionEnum
         isCoreLibraryDesugaringEnabled = true

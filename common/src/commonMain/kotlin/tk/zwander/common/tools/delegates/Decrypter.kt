@@ -36,10 +36,21 @@ object Decrypter {
                             model = model.model.value,
                             region = model.region.value,
                             imeiSerial = model.imeiSerial.value,
-                            onFinish = {
+                            onErrorFinish = {
                                 model.endJob(it)
                                 eventManager.sendEvent(Event.Decrypt.Finish)
                             },
+                            legacy = false,
+                        ) ?: Request.retrieveBinaryFileInfo(
+                            fw = model.fw.value,
+                            model = model.model.value,
+                            region = model.region.value,
+                            imeiSerial = model.imeiSerial.value,
+                            onErrorFinish = {
+                                model.endJob(it)
+                                eventManager.sendEvent(Event.Decrypt.Finish)
+                            },
+                            legacy = true,
                         )
 
                         if (binaryFileInfo != null) {

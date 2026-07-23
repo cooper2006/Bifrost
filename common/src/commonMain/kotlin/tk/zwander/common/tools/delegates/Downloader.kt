@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.FusClient
+import tk.zwander.common.tools.FusClientLegacy
+import tk.zwander.common.tools.IFusClient
 import tk.zwander.common.tools.Request
 import tk.zwander.common.tools.VersionFetch
 import tk.zwander.common.util.BifrostSettings
@@ -46,6 +48,41 @@ object Downloader {
         model: DownloadModel,
         confirmCallback: DownloadErrorCallback,
     ) {
+        val standard = onDownload(
+            model = model,
+            confirmCallback = confirmCallback,
+            legacy = false,
+            onFinish = { error, message ->
+                if (!error) {
+                    model.endJob(message)
+                    eventManager.sendEvent(Event.Download.Finish)
+                    return@onDownload
+                }
+            },
+        )
+
+        if (standard) {
+            return
+        }
+
+        // Legacy fallback
+        onDownload(
+            model = model,
+            confirmCallback = confirmCallback,
+            legacy = true,
+            onFinish = { _, message ->
+                model.endJob(message)
+                eventManager.sendEvent(Event.Download.Finish)
+            },
+        )
+    }
+
+    suspend fun onDownload(
+        model: DownloadModel,
+        confirmCallback: DownloadErrorCallback,
+        legacy: Boolean,
+        onFinish: suspend (error: Boolean, message: String) -> Unit,
+    ): Boolean {
         eventManager.sendEvent(Event.Download.Start)
         model.statusText.value = MR.strings.downloading()
 
@@ -59,92 +96,105 @@ object Downloader {
                         message = exception.message!!,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(info!!, model)
+                                performDownload(
+                                    info = info!!,
+                                    model = model,
+                                    legacy = legacy,
+                                    onFinish = onFinish,
+                                )
                             },
                             onCancel = {
-                                model.endJob("")
-                                eventManager.sendEvent(Event.Download.Finish)
+                                onFinish(false, "")
                             },
                         )
                     ),
                 )
             },
-            onFinish = {
-                model.endJob(it)
-                eventManager.sendEvent(Event.Download.Finish)
+            onErrorFinish = {
+                onFinish(true, it)
             },
             shouldReportError = {
                 !model.manual.value
             },
-            imeiSerial = "",
+            imeiSerial = model.imeiSerial.value,
+            legacy = legacy,
         )
 
-        if (info != null) {
-            performDownload(info, model)
+        return if (info != null) {
+            performDownload(info = info, model = model, legacy = legacy, onFinish = onFinish)
+            true
+        } else {
+            false
         }
     }
 
     @OptIn(ExperimentalTime::class)
-    private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
-        logger.debug("performDownload called, info = $info")
-        
-        val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
-        
-        logger.debug("path = $path, fileName = $fileName, size = $size, crc32 = $crc32, modelType = $modelType")
-        logger.debug("fwVer = $fwVer")
-
-        val fullFileName = fileName.replace(
-            ".zip",
-            "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
-        ).substringAfterLast("/")
-
-        val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
-            "DecryptionKey_${fullFileName}.txt"
-        } else {
-            null
-        }
-
-        val downloadDirectory = FileManager.pickDirectory()
-        if (downloadDirectory == null) {
-            model.endJob("")
-            eventManager.sendEvent(Event.Download.Finish)
-            return
-        }
-        
-        // Use download directory for temp files as well to avoid path issues
-        val tempDirectory = downloadDirectory
-        
-        logger.debug("downloadDirectory = $downloadDirectory, tempDirectory = $tempDirectory")
-        logger.debug("About to create files")
-        
-        val files = createDownloadFiles(downloadDirectory, fullFileName)
-            ?: return
-        
-        val (encFile, extractedEncFile, decFile) = files
-        val decKeyFile = downloadDirectory?.let { dir ->
-            decryptionKeyFileName?.let { dec ->
-                dir.child(dec, false)
-            }
-        }
-
-        // Track temporary files for cleanup
-        model.addTempFile(encFile)
-        model.addTempFile(extractedEncFile)
-        model.addTempFile(decFile)
-        model.addTempFile(decKeyFile)
-
-        logger.debug("decKeyFile = $decKeyFile")
-        writeDecryptionKey(decKeyFile, fullFileName, v4Key, model)
-
-        // The FUS nonce can become invalid between BinaryInit and the actual
-        // file download (random 401). When that happens we regenerate the
-        // nonce and re-run both steps so the init and download share the same
-        // session, bounded to prevent an infinite loop.
-        val maxInitRetries = 3
-        var initRetries = 0
-        var md5: String? = null
-
+    private suspend fun performDownload(
+        info: BinaryFileInfo,
+        model: DownloadModel,
+        legacy: Boolean,
+        onFinish: suspend (error: Boolean, message: String) -> Unit,
+    ) {
         try {
+            val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
+            
+            logger.debug("performDownload called, info = $info")
+            logger.debug("path = $path, fileName = $fileName, size = $size, crc32 = $crc32, modelType = $modelType")
+            logger.debug("fwVer = $fwVer")
+
+            val fullFileName = fileName.replace(
+                ".zip",
+                "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
+            ).substringAfterLast("/")
+
+            val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
+                "DecryptionKey_${fullFileName}.txt"
+            } else {
+                null
+            }
+
+            val downloadDirectory = FileManager.pickDirectory()
+            if (downloadDirectory == null) {
+                onFinish(false, "")
+                return
+            }
+            
+            // Use download directory for temp files as well to avoid path issues
+            val tempDirectory = downloadDirectory
+            
+            logger.debug("downloadDirectory = $downloadDirectory, tempDirectory = $tempDirectory")
+            logger.debug("About to create files")
+            
+            val files = createDownloadFiles(downloadDirectory, fullFileName)
+                ?: run {
+                    onFinish(false, "")
+                    return
+                }
+            
+            val (encFile, extractedEncFile, decFile) = files
+            val decKeyFile = downloadDirectory.let { dir ->
+                decryptionKeyFileName?.let { dec ->
+                    dir.child(dec, false)
+                }
+            }
+
+            // Track temporary files for cleanup
+            model.addTempFile(encFile)
+            model.addTempFile(extractedEncFile)
+            model.addTempFile(decFile)
+            model.addTempFile(decKeyFile)
+
+            logger.debug("decKeyFile = $decKeyFile")
+            writeDecryptionKey(decKeyFile, fullFileName, v4Key, model)
+
+            // The FUS nonce can become invalid between BinaryInit and the actual
+            // file download (random 401). When that happens we regenerate the
+            // nonce and re-run both steps so the init and download share the same
+            // session, bounded to prevent an infinite loop.
+            val maxInitRetries = 3
+            var initRetries = 0
+            var md5: String? = null
+
             while (initRetries <= maxInitRetries) {
                 if (initRetries > 0) {
                     FusClient.refreshNonce()
@@ -152,12 +202,20 @@ object Downloader {
 
                 val request = Request.createBinaryInit(
                     fileName,
-                    FusClient.getNonce(),
+                    IFusClient.getNonce(legacy),
                     fwVer,
                     modelType,
                     model.region.value,
+                    legacy,
                 )
-                FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
+                IFusClient.selectClientAndMakeRequest(
+                    request = if (legacy) {
+                        FusClientLegacy.Request.BINARY_INIT
+                    } else {
+                        FusClient.Request.BINARY_INIT
+                    },
+                    data = request,
+                )
 
                 try {
                     val firmwareId = "${model.model.value}_${model.region.value}_${model.fw.value}"

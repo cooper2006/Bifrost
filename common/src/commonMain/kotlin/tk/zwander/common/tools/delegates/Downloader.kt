@@ -97,6 +97,12 @@ object Downloader {
         val downloadDirectory = FileManager.pickDirectory()
         val tempDirectory = FileManager.getTempDirectory()
 
+        if (downloadDirectory == null) {
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+
         val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
@@ -313,16 +319,19 @@ object Downloader {
             model.speed.value = 0L
             model.statusText.value = MR.strings.decrypting()
 
-            val key =
-                if (fullFileName.endsWith(".enc2")) {
-                    CryptUtils.getV2Key(
-                        model.fw.value,
-                        model.model.value,
-                        model.region.value,
-                    ).first
-                } else {
-                    info.v4Key?.first!!
-                }
+            val key = if (fullFileName.endsWith(".enc2")) {
+                CryptUtils.getV2Key(
+                    model.fw.value,
+                    model.model.value,
+                    model.region.value,
+                ).first
+            } else if (info.v4Key != null) {
+                info.v4Key.first
+            } else {
+                model.endJob("")
+                return
+            }
+
 
             CryptUtils.decryptProgress(
                 extractedEncFile.openInputStream() ?: return,

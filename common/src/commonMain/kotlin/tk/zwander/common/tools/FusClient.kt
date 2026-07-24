@@ -131,7 +131,6 @@ object FusClient {
                     append("Authorization", authV)
                     append("User-Agent", "SMART 2.0")
                     append("Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
-                    append("Set-Cookie", "JSESSIONID=${sessionId};SESSION=${sessionId}")
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
@@ -199,7 +198,7 @@ object FusClient {
         val authV = getAuthV(cloud = true)
 
         val md5 = globalHttpClient.prepareRequest {
-            method = HttpMethod.Get
+            method = HttpMethod.Head
             url(url)
             headers {
                 append("Authorization", authV)
@@ -248,7 +247,13 @@ object FusClient {
         }
 
         try {
-            while (true) {
+            // Bounded retry: Ketch may internally retry, but guard against
+            // an infinite loop if a task is permanently failed but flagged
+            // as retryable.
+            var ketchRetries = 0
+            val maxKetchRetries = 3
+
+            while (ketchRetries <= maxKetchRetries) {
                 val result = task.await()
 
                 if (result.isSuccess) {
@@ -260,6 +265,12 @@ object FusClient {
                         throw error
                     }
                 }
+
+                ketchRetries++
+            }
+
+            if (ketchRetries > maxKetchRetries) {
+                throw RuntimeException("Download failed after retries")
             }
         } catch (_: CancellationException) {
             task.pause()

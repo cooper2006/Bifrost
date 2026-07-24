@@ -32,3 +32,6 @@
 /iosApp/output/
 /.idea/deploymentTargetDropDown.xml
 /.idea/appInsightsSettings.xml
+
+# Local Gradle wrapper script
+gradle-wrapper-local

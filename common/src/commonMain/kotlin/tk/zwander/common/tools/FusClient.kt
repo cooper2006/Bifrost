@@ -36,7 +36,7 @@ import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.ketch
 
 /**
- * Manage communications with Samsung's server.
+ * 管理与三星服务器的通信。
  */
 object FusClient {
     enum class Request(val value: String, val cloud: Boolean) {
@@ -65,19 +65,19 @@ object FusClient {
 
     private suspend fun generateNonce() {
         BugsnagUtils.addBreadcrumb(
-            message = "Generating nonce.",
+            message = "生成随机数。",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("Generating nonce.")
+        println("生成随机数。")
         makeReq(Request.GENERATE_NONCE)
         BugsnagUtils.addBreadcrumb(
-            message = "Nonce: $nonce, Auth: $auth",
+            message = "随机数: $nonce, 认证: $auth",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("Nonce: $nonce")
-        println("Auth: $auth")
+        println("随机数: $nonce")
+        println("认证: $auth")
     }
 
     private suspend fun makeSignatureHash(signature: String?): String? {
@@ -112,10 +112,10 @@ object FusClient {
     }
 
     /**
-     * Make a request to Samsung, automatically inserting authorization data.
-     * @param request the request to make.
-     * @param data any body data that needs to go into the request.
-     * @return the response body data, as text. Usually XML.
+     * 向三星发送请求，自动插入授权数据。
+     * @param request 要发送的请求。
+     * @param data 需要放入请求中的任何正文数据。
+     * @return 响应正文数据，作为文本。通常是XML。
      */
     suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
@@ -153,11 +153,11 @@ object FusClient {
                 } catch (_: Exception) {}
             } catch (e: ArrayIndexOutOfBoundsException) {
                 BugsnagUtils.addBreadcrumb(
-                    message = "Error generating nonce.",
+                    message = "生成随机数时出错。",
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                println("Error generating nonce.")
+                println("生成随机数时出错。")
                 e.printStackTrace()
             }
         }
@@ -180,9 +180,12 @@ object FusClient {
     }
 
     /**
-     * Download a file from Samsung's server.
-     * @param fileName the name of the file to download.
-     * @param start an optional offset. Used for resuming downloads.
+     * 从三星服务器下载文件。
+     * @param fileName 要下载的文件名。
+     * @param start 可选的偏移量。用于恢复下载。
+     * @param size 文件大小
+     * @param dest 目标文件
+     * @param progressCallback 进度回调
      */
     @OptIn(InternalAPI::class, InternalIoApi::class)
     suspend fun downloadFile(
@@ -194,7 +197,7 @@ object FusClient {
     ): String? {
         val url = getDownloadUrl(fileName)
 
-        // Probe for Content-MD5.
+        // 获取 Content-MD5。
         val authV = getAuthV(cloud = true)
 
         val md5 = globalHttpClient.prepareRequest {
@@ -214,6 +217,21 @@ object FusClient {
             }
         }.execute { response ->
             response.headers["Content-MD5"]
+        }
+
+        // 根据文件大小决定是否使用并行下载
+        val useParallelDownload = size > 100L * 1024 * 1024  // 大于100MB使用并行下载
+        
+        if (useParallelDownload) {
+            println("使用并行下载模式，文件大小: ${size / (1024 * 1024)}MB")
+            return ParallelDownloader.downloadFile(
+                fileName = fileName,
+                start = start,
+                size = size,
+                dest = dest,
+                progressCallback = progressCallback,
+                authV = authV,
+            )
         }
 
         val task = ketch.tasks.value.find { it.request.url == url }
@@ -247,9 +265,7 @@ object FusClient {
         }
 
         try {
-            // Bounded retry: Ketch may internally retry, but guard against
-            // an infinite loop if a task is permanently failed but flagged
-            // as retryable.
+            // 有界重试：Ketch 可能内部重试，但防止无限循环
             var ketchRetries = 0
             val maxKetchRetries = 3
 
@@ -270,7 +286,7 @@ object FusClient {
             }
 
             if (ketchRetries > maxKetchRetries) {
-                throw RuntimeException("Download failed after retries")
+                throw RuntimeException("下载重试次数超限")
             }
         } catch (_: CancellationException) {
             task.pause()

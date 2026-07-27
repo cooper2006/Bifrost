@@ -269,7 +269,7 @@ object Request {
             return null
         } else if (error != null) {
             println("[BifrostDownload] retrieveBinaryFileInfo: error -> ${error.message}")
-            onFinish("${error.message ?: MR.strings.error()}\n\n${output}")
+            onErrorFinish("${error.message ?: MR.strings.error()}\n\n${output}")
             if (result.isReportableCode() &&
                 !output.contains("Incapsula") &&
                 error !is CancellationException &&

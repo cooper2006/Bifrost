@@ -56,30 +56,26 @@ object Downloader {
                         message = exception.message!!,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(
-                                    info = info!!,
-                                    model = model,
-                                    legacy = legacy,
-                                    onFinish = onFinish,
-                                )
+                                performDownload(info!!, model)
                             },
                             onCancel = {
-                                onFinish(false, "")
+                                model.endJob("")
+                                eventManager.sendEvent(Event.Download.Finish)
                             },
                         )
                     ),
                 )
             },
-            onFinish = {
-                println("[BifrostDownload] onDownload retrieveBinaryFileInfo onFinish: ${it.take(80)}")
-                model.endJob(it)
+            onErrorFinish = { text ->
+                println("[BifrostDownload] onDownload retrieveBinaryFileInfo onErrorFinish: ${text.take(80)}")
+                model.endJob(text)
                 eventManager.sendEvent(Event.Download.Finish)
             },
             shouldReportError = {
                 !model.manual.value
             },
             imeiSerial = model.imeiSerial.value,
-            legacy = legacy,
+            legacy = false,
         )
 
         if (info != null) {
@@ -191,9 +187,15 @@ object Downloader {
                     fwVer,
                     modelType,
                     model.region.value,
+                    legacy = false,
                 )
                 println("[BifrostDownload] performDownload: sending BinaryInit request (attempt ${initRetries + 1})")
-                FusClient.makeReq(FusClient.Request.BINARY_INIT, request)
+                FusClient.makeReq(
+                    request = FusClient.Request.BINARY_INIT,
+                    data = request,
+                    signature = null,
+                    includeNonce = true,
+                )
                 println("[BifrostDownload] performDownload: BinaryInit response received")
 
                 try {
@@ -215,8 +217,14 @@ object Downloader {
                                     fwVer,
                                     modelType,
                                     model.region.value,
+                                    legacy = false,
                                 )
-                                FusClient.makeReq(FusClient.Request.BINARY_INIT, initRequest)
+                                FusClient.makeReq(
+                                    request = FusClient.Request.BINARY_INIT,
+                                    data = initRequest,
+                                    signature = null,
+                                    includeNonce = true,
+                                )
                             },
                             progressCallback = { current, max, bps ->
                                 // Check for pause

@@ -58,14 +58,14 @@ object FusClient : IFusClient<FusClient.Request> {
         generateNonce()
     }
 
-    private suspend fun generateNonce() {
+    override suspend fun generateNonce() {
         BugsnagUtils.addBreadcrumb(
             message = "生成随机数。",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
         println("生成随机数。")
-        makeReq(Request.GENERATE_NONCE)
+        makeReq(Request.GENERATE_NONCE, "", null, true)
         BugsnagUtils.addBreadcrumb(
             message = "随机数: $nonce, 认证: $auth",
             data = mapOf(),
@@ -102,7 +102,7 @@ object FusClient : IFusClient<FusClient.Request> {
                 "realm=\"${if (hasSignature) "interface" else ""}\""
     }
 
-    private fun getDownloadUrl(path: String): String {
+    override suspend fun getDownloadUrl(path: String): String {
         // 注意：三星 FUS 下载服务器仅支持 HTTP（不支持 HTTPS）。
         // Authorization header 中的认证信息将以明文传输，这是协议限制。
         return "http://cloud-neofussvr.samsungmobile.com/NF_SmartDownloadBinaryForMass.do?file=${path}"
@@ -114,7 +114,14 @@ object FusClient : IFusClient<FusClient.Request> {
      * @param data 需要放入请求中的任何正文数据。
      * @return 响应正文数据，作为文本。通常是XML。
      */
-    suspend fun makeReq(request: Request, data: String = "", signature: String? = null, retryCount: Int = 0): String {
+    override suspend fun makeReq(
+        request: Request,
+        data: String,
+        signature: String?,
+        includeNonce: Boolean,
+    ): String = makeReqWithRetry(request, data, signature, includeNonce, retryCount = 0)
+
+    private suspend fun makeReqWithRetry(request: Request, data: String, signature: String?, includeNonce: Boolean, retryCount: Int): String {
         println("[BifrostDownload] makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}, retry=$retryCount")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
             println("[BifrostDownload] makeReq: nonce blank, generating...")
@@ -149,7 +156,7 @@ object FusClient : IFusClient<FusClient.Request> {
             println("[BifrostDownload] makeReq: got 401, regenerating nonce and retrying (${retryCount + 1}/3)")
             generateNonce()
 
-            return makeReq(request, data, signature, retryCount + 1)
+            return makeReqWithRetry(request, data, signature, includeNonce, retryCount + 1)
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {

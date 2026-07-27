@@ -1,10 +1,10 @@
 ---
-name: IMEI Database Request
-about: Request a model and TAC be added to the database for generating IMEIs
-title: ''
+name: IMEI 数据库请求
+about: 请求将型号和 TAC 添加到 IMEI 生成数据库中
+ title: ''
 labels: ''
 assignees: ''
 
 ---
 
-<!-- Copy the TAC and model from the "More" screen in Bifrost on your Samsung device and paste below. -->
+<!-- 在您的三星设备上，从 Bifrost 的"更多"页面复制 TAC 和型号，并粘贴到下方。 -->

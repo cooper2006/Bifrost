@@ -141,4 +141,7 @@
     <string name="no_updates_available">没有可用的更新</string>
     <string name="check_for_updates">检查更新</string>
     <string name="check">检查</string>
+
+    <string name="downloadMode">下载模式</string>
+    <string name="downloadModeDesc">选择单线程 Ktor 流式下载（默认）或分块并行下载以获得大文件的更高性能。</string>
 </resources>

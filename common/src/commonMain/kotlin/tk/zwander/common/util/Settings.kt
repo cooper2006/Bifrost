@@ -48,6 +48,7 @@ object BifrostSettings {
         val bugsnagUuid = SettingsKey.String<String?>("bugsnag_user_id", null, settings)
         val enableDecryptKeySave = SettingsKey.Boolean("enable_decryption_key_download", false, settings)
         val useFileFramework = SettingsKey.Boolean("use_file_framework", false, settings)
+        val downloadMode = SettingsKey.Boolean("download_mode", false, settings) // false = single-thread, true = parallel
     }
 
     val settings = ObservableBifrostSettings(ObservableSettings())

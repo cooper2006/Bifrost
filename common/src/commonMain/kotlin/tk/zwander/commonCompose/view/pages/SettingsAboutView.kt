@@ -84,6 +84,14 @@ val options = arrayListOf<IOptionItem>().apply {
 
     add(
         IOptionItem.BasicOptionItem.BooleanItem(
+            label = MR.strings.downloadMode,
+            desc = MR.strings.downloadModeDesc,
+            key = BifrostSettings.Keys.downloadMode,
+        ),
+    )
+
+    add(
+        IOptionItem.BasicOptionItem.BooleanItem(
             label = MR.strings.allowLowercaseCharacters,
             desc = MR.strings.allowLowercaseCharactersDesc,
             key = BifrostSettings.Keys.allowLowercaseCharacters,

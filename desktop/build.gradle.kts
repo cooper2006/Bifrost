@@ -50,6 +50,24 @@ tasks.withType<org.gradle.jvm.tasks.Jar> {
 
 tasks.withType<ComposeHotRun>().configureEach {
     mainClass.set("MainKt")
+    // Skiko tries to create a lock file in ~/.skiko/, which may fail under
+    // sandbox restrictions. Point it at the cached native library directory
+    // so it skips the download + lock-file path.
+    val skikoDir = file(System.getProperty("user.home") + "/.skiko")
+    if (skikoDir.exists()) {
+        val osPrefix = when {
+            System.getProperty("os.name").lowercase().contains("mac") -> "skiko-macos-"
+            System.getProperty("os.name").lowercase().contains("linux") -> "skiko-linux-"
+            System.getProperty("os.name").lowercase().contains("windows") -> "skiko-windows-"
+            else -> "skiko-macos-"
+        }
+        val dylibDir = skikoDir.listFiles()
+            ?.filter { it.isDirectory && it.name.startsWith(osPrefix) }
+            ?.firstOrNull()
+        if (dylibDir != null) {
+            jvmArgs("-Dskiko.library.path=${dylibDir.absolutePath}")
+        }
+    }
 }
 
 compose.desktop {

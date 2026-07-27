@@ -1,7 +1,5 @@
 package tk.zwander.common.tools.delegates
 
-import com.linroid.ketch.api.KetchError
-import dev.zwander.kotlin.file.IPlatformFile
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +19,6 @@ import tk.zwander.common.util.Event
 import tk.zwander.common.util.FileManager
 import tk.zwander.common.util.eventManager
 import tk.zwander.common.util.invoke
-import tk.zwander.common.util.ketch
 import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.commonCompose.model.DownloadModel
 import tk.zwander.samloaderkotlin.resources.MR
@@ -48,41 +45,7 @@ object Downloader {
         model: DownloadModel,
         confirmCallback: DownloadErrorCallback,
     ) {
-        val standard = onDownload(
-            model = model,
-            confirmCallback = confirmCallback,
-            legacy = false,
-            onFinish = { error, message ->
-                if (!error) {
-                    model.endJob(message)
-                    eventManager.sendEvent(Event.Download.Finish)
-                    return@onDownload
-                }
-            },
-        )
-
-        if (standard) {
-            return
-        }
-
-        // Legacy fallback
-        onDownload(
-            model = model,
-            confirmCallback = confirmCallback,
-            legacy = true,
-            onFinish = { _, message ->
-                model.endJob(message)
-                eventManager.sendEvent(Event.Download.Finish)
-            },
-        )
-    }
-
-    suspend fun onDownload(
-        model: DownloadModel,
-        confirmCallback: DownloadErrorCallback,
-        legacy: Boolean,
-        onFinish: suspend (error: Boolean, message: String) -> Unit,
-    ): Boolean {
+        println("[BifrostDownload] onDownload start: model=${model.model.value}, fw=${model.fw.value}, region=${model.region.value}")
         eventManager.sendEvent(Event.Download.Start)
         model.statusText.value = MR.strings.downloading()
 
@@ -91,112 +54,134 @@ object Downloader {
             model = model.model.value,
             region = model.region.value,
             onVersionException = { exception, info ->
+                println("[BifrostDownload] onDownload version exception: ${exception.message}")
                 confirmCallback.onError(
                     info = DownloadErrorInfo(
                         message = exception.message!!,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(
-                                    info = info!!,
-                                    model = model,
-                                    legacy = legacy,
-                                    onFinish = onFinish,
-                                )
+                                performDownload(info!!, model)
                             },
                             onCancel = {
-                                onFinish(false, "")
+                                model.endJob("")
+                                eventManager.sendEvent(Event.Download.Finish)
                             },
                         )
                     ),
                 )
             },
-            onErrorFinish = {
-                onFinish(true, it)
+            onErrorFinish = { text ->
+                println("[BifrostDownload] onDownload retrieveBinaryFileInfo onErrorFinish: ${text.take(80)}")
+                model.endJob(text)
+                eventManager.sendEvent(Event.Download.Finish)
             },
             shouldReportError = {
                 !model.manual.value
             },
             imeiSerial = model.imeiSerial.value,
-            legacy = legacy,
+            legacy = false,
         )
 
-        return if (info != null) {
-            performDownload(info = info, model = model, legacy = legacy, onFinish = onFinish)
-            true
+        if (info != null) {
+            println("[BifrostDownload] onDownload: retrieved file info, fileName=${info.fileName}, size=${info.size}")
+            performDownload(info, model)
         } else {
-            false
+            println("[BifrostDownload] onDownload: no file info returned")
         }
     }
 
     @OptIn(ExperimentalTime::class)
-    private suspend fun performDownload(
-        info: BinaryFileInfo,
-        model: DownloadModel,
-        legacy: Boolean,
-        onFinish: suspend (error: Boolean, message: String) -> Unit,
-    ) {
+    private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
+        val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
+        println("[BifrostDownload] performDownload start: path=$path, fileName=$fileName, size=${size}bytes, crc32=$crc32, hasV4Key=${v4Key != null}, fwVer=$fwVer, modelType=$modelType")
+
+        val fullFileName = fileName.replace(
+            ".zip",
+            "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
+        ).substringAfterLast("/")
+        println("[BifrostDownload] performDownload: fullFileName=$fullFileName")
+
+        val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
+            "DecryptionKey_${fullFileName}.txt"
+        } else {
+            null
+        }
+
+        val downloadDirectory = FileManager.pickDirectory()
+        val tempDirectory = FileManager.getTempDirectory()
+        println("[BifrostDownload] performDownload: downloadDir=${downloadDirectory?.getAbsolutePath()}, tempDir=${tempDirectory?.getAbsolutePath()}")
+
+        if (downloadDirectory == null) {
+            println("[BifrostDownload] performDownload: downloadDirectory null, aborting")
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+
+        val encFile = (tempDirectory ?: downloadDirectory)?.child(fullFileName, false) ?: run {
+            println("[BifrostDownload] performDownload: encFile null, aborting")
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+        val extractedEncFile = downloadDirectory?.child(fullFileName, false) ?: run {
+            println("[BifrostDownload] performDownload: extractedEncFile null, aborting")
+            model.endJob("")
+            eventManager.sendEvent(Event.Download.Finish)
+            return
+        }
+        val decFile = downloadDirectory.child(
+            fullFileName.replace(".enc2", "")
+                .replace(".enc4", ""),
+            false,
+        )
+        val decKeyFile = downloadDirectory.let { dir ->
+            decryptionKeyFileName?.let { dec ->
+                dir.child(dec, false)
+            }
+        }
+        println("[BifrostDownload] performDownload: encFile=${encFile.getAbsolutePath()}, decFile=${decFile?.getAbsolutePath()}")
+
+        // Track temporary files for cleanup
+        model.addTempFile(encFile)
+        model.addTempFile(extractedEncFile)
+        model.addTempFile(decFile)
+        model.addTempFile(decKeyFile)
+
+        if (decKeyFile != null) {
+            println("[BifrostDownload] performDownload: writing decryption key file")
+        }
+        decKeyFile?.openOutputStream(false)?.use { output ->
+            if (fullFileName.endsWith(".enc2")) {
+                output.write(
+                    CryptUtils.getV2Key(
+                        model.fw.value,
+                        model.model.value,
+                        model.region.value,
+                    ).second.toByteArray(),
+                )
+            }
+
+            v4Key?.let {
+                output.write(v4Key.second.toByteArray())
+            }
+        }
+
+        // The FUS nonce can become invalid between BinaryInit and the actual
+        // file download (random 401). When that happens we regenerate the
+        // nonce and re-run both steps so the init and download share the same
+        // session, bounded to prevent an infinite loop.
+        // Also handles socket timeouts for large files (17GB+) by resuming
+        // from the current file offset.
+        val maxInitRetries = 10
+        var initRetries = 0
+        var md5: String? = null
+        println("[BifrostDownload] performDownload: entering BinaryInit+download retry loop (max $maxInitRetries)")
+
         try {
-            val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
-            
-            logger.debug("performDownload called, info = $info")
-            logger.debug("path = $path, fileName = $fileName, size = $size, crc32 = $crc32, modelType = $modelType")
-            logger.debug("fwVer = $fwVer")
-
-            val fullFileName = fileName.replace(
-                ".zip",
-                "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
-            ).substringAfterLast("/")
-
-            val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
-                "DecryptionKey_${fullFileName}.txt"
-            } else {
-                null
-            }
-
-            val downloadDirectory = FileManager.pickDirectory()
-            if (downloadDirectory == null) {
-                onFinish(false, "")
-                return
-            }
-            
-            // Use download directory for temp files as well to avoid path issues
-            val tempDirectory = downloadDirectory
-            
-            logger.debug("downloadDirectory = $downloadDirectory, tempDirectory = $tempDirectory")
-            logger.debug("About to create files")
-            
-            val files = createDownloadFiles(downloadDirectory, fullFileName)
-                ?: run {
-                    onFinish(false, "")
-                    return
-                }
-            
-            val (encFile, extractedEncFile, decFile) = files
-            val decKeyFile = downloadDirectory.let { dir ->
-                decryptionKeyFileName?.let { dec ->
-                    dir.child(dec, false)
-                }
-            }
-
-            // Track temporary files for cleanup
-            model.addTempFile(encFile)
-            model.addTempFile(extractedEncFile)
-            model.addTempFile(decFile)
-            model.addTempFile(decKeyFile)
-
-            logger.debug("decKeyFile = $decKeyFile")
-            writeDecryptionKey(decKeyFile, fullFileName, v4Key, model)
-
-            // The FUS nonce can become invalid between BinaryInit and the actual
-            // file download (random 401). When that happens we regenerate the
-            // nonce and re-run both steps so the init and download share the same
-            // session, bounded to prevent an infinite loop.
-            val maxInitRetries = 3
-            var initRetries = 0
-            var md5: String? = null
-
             while (initRetries <= maxInitRetries) {
                 if (initRetries > 0) {
+                    println("[BifrostDownload] performDownload: retry #$initRetries, refreshing nonce")
                     FusClient.refreshNonce()
                 }
 
@@ -206,46 +191,87 @@ object Downloader {
                     fwVer,
                     modelType,
                     model.region.value,
-                    legacy,
+                    legacy = false,
                 )
-                IFusClient.selectClientAndMakeRequest(
-                    request = if (legacy) {
-                        FusClientLegacy.Request.BINARY_INIT
-                    } else {
-                        FusClient.Request.BINARY_INIT
-                    },
+                println("[BifrostDownload] performDownload: sending BinaryInit request (attempt ${initRetries + 1})")
+                FusClient.makeReq(
+                    request = FusClient.Request.BINARY_INIT,
                     data = request,
+                    signature = null,
+                    includeNonce = true,
                 )
+                println("[BifrostDownload] performDownload: BinaryInit response received")
 
                 try {
-                    val firmwareId = "${model.model.value}_${model.region.value}_${model.fw.value}"
-                        .replace("/", "_")
+                    val existingLen = encFile.getLength()
+                    println("[BifrostDownload] performDownload: existing enc len=$existingLen, target size=$size, willDownload=${existingLen < size}")
+                    md5 = if (existingLen < size) {
+                        // Single-thread Ktor streaming mode (always used; parallel mode is disabled)
+                        FusClient.downloadFile(
+                            fileName = path + fileName,
+                            start = encFile.getLength(),
+                            size = size,
+                            dest = encFile,
+                            onAuthRefresh = {
+                                println("[BifrostDownload] performDownload: onAuthRefresh, refreshing nonce then re-sending BinaryInit")
+                                FusClient.refreshNonce()
+                                val initRequest = Request.createBinaryInit(
+                                    fileName,
+                                    FusClient.getNonce(),
+                                    fwVer,
+                                    modelType,
+                                    model.region.value,
+                                    legacy = false,
+                                )
+                                FusClient.makeReq(
+                                    request = FusClient.Request.BINARY_INIT,
+                                    data = initRequest,
+                                    signature = null,
+                                    includeNonce = true,
+                                )
+                            },
+                            progressCallback = { current, max, bps ->
+                                // Check for pause
+                                while (model.isPaused.value) {
+                                    kotlinx.coroutines.delay(100)
+                                }
 
-                    md5 = handleFileDownload(
-                        encFile = encFile,
-                        extractedEncFile = extractedEncFile,
-                        downloadDirectory = downloadDirectory,
-                        path = path,
-                        fileName = fileName,
-                        size = size,
-                        crc32 = crc32,
-                        v4Key = v4Key,
-                        firmwareId = firmwareId,
-                        model = model,
-                    )
-                    break // download succeeded
-                } catch (e: KetchError) {
-                    val isAuth = when (e) {
-                        is KetchError.Http -> e.code == 401
-                        is KetchError.AuthenticationFailed -> true
-                        else -> false
+                                model.progress.value = current to max
+                                model.speed.value = bps
+
+                                eventManager.sendEvent(
+                                    Event.Download.Progress(
+                                        status = MR.strings.downloading(),
+                                        current = current,
+                                        max = max,
+                                    )
+                                )
+                            }
+                        )
+                    } else {
+                        println("[BifrostDownload] performDownload: file already complete, skipping download")
+                        null
                     }
-                    if (isAuth && initRetries < maxInitRetries) {
+                    println("[BifrostDownload] performDownload: download phase complete, md5=$md5")
+                    break // download succeeded
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val isAuth = e.message?.contains("401") == true
+                    val isTimeout = e is java.net.SocketTimeoutException ||
+                        e.message?.contains("timeout") == true ||
+                        e.message?.contains("SocketTimeout") == true
+                    val isConnectionClosed = e.javaClass.simpleName.contains("ClosedByteChannel") ||
+                        e.message?.contains("closed", ignoreCase = true) == true ||
+                        (e is java.io.IOException && e !is java.nio.file.FileSystemException)
+                    println("[BifrostDownload] performDownload: download error: ${e.javaClass.simpleName}: ${e.message}, isAuth=$isAuth, isTimeout=$isTimeout, isConnectionClosed=$isConnectionClosed")
+                    if ((isAuth || isTimeout || isConnectionClosed) && initRetries < maxInitRetries) {
                         initRetries++
-                        ketch.tasks.value
-                            .find {
-                                it.request.url.contains("NF_SmartDownloadBinaryForMass.do")
-                            }?.remove()
+                        if (isAuth) {
+                            println("[BifrostDownload] performDownload: auth failure, will retry ($initRetries/$maxInitRetries)")
+                        } else {
+                            println("[BifrostDownload] performDownload: connection lost, will retry from offset ($initRetries/$maxInitRetries)")
+                        }
                         continue
                     }
                     throw e
@@ -260,6 +286,7 @@ object Downloader {
             }
 
             if (crc32 != null) {
+                println("[BifrostDownload] performDownload: starting CRC32 check, expected=$crc32")
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingCRC()
                 logger.debug("Starting final CRC32 check, file size: ${encFile.getLength()}, expected CRC32: $crc32")
@@ -284,17 +311,19 @@ object Downloader {
                         )
                     )
                 }
+                println("[BifrostDownload] performDownload: CRC32 result=$result")
 
-                    if (!result) {
-                        logger.error("Final CRC32 check FAILED!")
-                        model.endJob(MR.strings.crcCheckFailed())
-                        return
-                    } else {
-                        logger.debug("Final CRC32 check PASSED!")
-                    }
+                if (!result) {
+                    println("[BifrostDownload] performDownload: CRC32 check FAILED")
+                    model.endJob(MR.strings.crcCheckFailed())
+                    return
+                }
+            } else {
+                println("[BifrostDownload] performDownload: no CRC32 provided, skipping")
             }
 
             if (md5 != null) {
+                println("[BifrostDownload] performDownload: starting MD5 check, expected=$md5")
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingMD5()
 
@@ -312,22 +341,29 @@ object Downloader {
                         encFile.openInputStream(),
                     )
                 }
+                println("[BifrostDownload] performDownload: MD5 result=$result")
 
                 if (!result) {
+                    println("[BifrostDownload] performDownload: MD5 check FAILED")
                     model.endJob(MR.strings.md5CheckFailed())
                     return
                 }
+            } else {
+                println("[BifrostDownload] performDownload: no MD5 provided, skipping")
             }
 
             if (tempDirectory != null && tempDirectory != downloadDirectory && extractedEncFile.getLength() < size) {
+                println("[BifrostDownload] performDownload: copying temp file to download dir")
                 model.speed.value = 0L
                 model.statusText.value = "Copying"
 
                 val input = encFile.openInputStream() ?: run {
+                    println("[BifrostDownload] performDownload: copy input stream null, aborting")
                     model.endJob("")
                     return
                 }
                 val output = extractedEncFile.openOutputStream() ?: run {
+                    println("[BifrostDownload] performDownload: copy output stream null, aborting")
                     model.endJob("")
                     return
                 }
@@ -355,31 +391,35 @@ object Downloader {
                             )
                         },
                     )
+                    println("[BifrostDownload] performDownload: copy complete")
                 } finally {
                     input.close()
                     output.close()
                     encFile.delete()
+                    println("[BifrostDownload] performDownload: temp enc file deleted after copy")
                 }
             }
 
-            if (BifrostSettings.Keys.autoDecryptFirmware()) {
-                model.speed.value = 0L
-                model.statusText.value = MR.strings.decrypting()
+            println("[BifrostDownload] performDownload: starting decryption")
+            model.speed.value = 0L
+            model.statusText.value = MR.strings.decrypting()
 
-                val key =
-                    if (fullFileName.endsWith(".enc2")) {
-                        CryptUtils.getV2Key(
-                            model.fw.value,
-                            model.model.value,
-                            model.region.value,
-                        ).first
-                    } else {
-                        info.v4Key?.first ?: run {
-                            model.endJob(MR.strings.decryptError("Missing decryption key (v4Key is null)"))
-                            eventManager.sendEvent(Event.Download.Finish)
-                            return
-                        }
-                    }
+            val key = if (fullFileName.endsWith(".enc2")) {
+                println("[BifrostDownload] performDownload: using V2 key (.enc2)")
+                CryptUtils.getV2Key(
+                    model.fw.value,
+                    model.model.value,
+                    model.region.value,
+                ).first
+            } else if (info.v4Key != null) {
+                println("[BifrostDownload] performDownload: using V4 key (.enc4)")
+                info.v4Key.first
+            } else {
+                println("[BifrostDownload] performDownload: no key available, aborting")
+                model.endJob("")
+                return
+            }
+
 
                 CryptUtils.decryptProgress(
                     extractedEncFile.openInputStream() ?: return,
@@ -402,21 +442,21 @@ object Downloader {
                             max = max,
                         )
                     )
-                }
+                )
+            }
+            println("[BifrostDownload] performDownload: decryption complete")
 
-                if (BifrostSettings.Keys.autoDeleteEncryptedFirmware() && BifrostSettings.Keys.autoDecryptFirmware()) {
-                    encFile.delete()
-                    extractedEncFile.delete()
-                }
+            if (BifrostSettings.Keys.autoDeleteEncryptedFirmware()) {
+                println("[BifrostDownload] performDownload: auto-deleting encrypted files")
+                encFile.delete()
+                extractedEncFile.delete()
             }
 
-            model.endJob(MR.strings.done())
+            println("[BifrostDownload] performDownload: DONE")
+        model.endJobSuccess(MR.strings.done())
         } catch (e: Throwable) {
-            val message = if (e !is CancellationException) {
-                logger.error("Download error: ${e.message}")
-                logger.debug("Stack trace:", e)
-                (e.message ?: e.toString())
-            } else ""
+            println("[BifrostDownload] performDownload: FAILED: ${e.javaClass.simpleName}: ${e.message}")
+            val message = if (e !is CancellationException) "${e.message}" else ""
             model.endJob(message)
         }
 

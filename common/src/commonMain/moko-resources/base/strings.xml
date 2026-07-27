@@ -278,13 +278,8 @@
     <string name="donate">Donate</string>
 
     <string name="use_file_framework">Use File Framework</string>
-    <string name="use_file_framework_desc">Android\'s default file access framework doesn\'t support multi-connection downloads, so Bifrost has to download internally and then copy the file to your chosen destination. Enabling this will request file management permissions, allowing Bifrost direct file access to your internal storage.</string>
+    <string name="use_file_framework_desc">Android's default file access framework doesn't support multi-connection downloads, so Bifrost has to download internally and then copy the file to your chosen destination. Enabling this will request file management permissions, allowing Bifrost direct file access to your internal storage.</string>
 
-    <!-- Resume Download Dialog -->
-    <string name="resumeDownloadTitle">Resume Download</string>
-    <string name="resumeDownloadMessage">Found %1$d incomplete download(s). Would you like to resume them?</string>
-    <string name="resumeDownloadItem">%1$s (%2$d/%3$d chunks)</string>
-    <string name="resume">Resume</string>
-    <string name="skipAll">Skip All</string>
-    <string name="noIncompleteDownloads">No incomplete downloads found</string>
+    <string name="downloadMode">Download Mode</string>
+    <string name="downloadModeDesc">Select between single-threaded Ktor streaming (default) or chunked parallel downloads for improved performance on large files.</string>
 </resources>

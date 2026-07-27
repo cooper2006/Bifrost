@@ -1,664 +1,661 @@
 ## [Unreleased]
 
 ### Added
-- **Pause/Resume button** in the Downloader tab — toggle pause during firmware download, resume with a single click
-- **Automatic temp file cleanup** — when a download is cancelled or completed, temporary encrypted firmware files are deleted from disk
-- `pause.svg` / `play.svg` icons for the pause/resume button
-- **Chunked parallel download** — large firmware files are now downloaded using multiple parallel connections with dynamic chunk sizing (50MB-4GB based on file size)
-- **Resumable download support** — application detects incomplete downloads on startup and prompts user to resume
-- **Resume Download dialog** — shows list of incomplete downloads with chunk progress and resume options
-- **Chunk progress display** — shows completed chunks count during download (e.g., "Chunks: 3/5" for 18GB file with 4GB chunks)
-- `DownloadState` and `ChunkState` data models for tracking download progress
-- `DownloadStateManager` for persisting download state across sessions
-- Multi-language support for resume download strings (English and Chinese)
+- **暂停/恢复按钮**：在下载器标签页中，固件下载时可切换暂停，单击即可恢复
+- **自动清理临时文件**：下载取消或完成时，从磁盘删除临时的加密固件文件
+- 暂停/恢复按钮的 `pause.svg` / `play.svg` 图标
+- **HTTP Range 断点续传**：失败/中断的下载现在通过 `Range: bytes={start}-` 从当前文件偏移继续，而非从头开始
+- **Socket 超时处理**：下载在 60 秒 socket 空闲后中止并自动重试/续传（此前在连接静默断开时会无限阻塞）
+- `ParallelDownloader`：分块并行下载引擎，使用 `FileChannel` positioned write 和分块级 401 重试（已实现，尚未接入主流程）
+- `FusClient.downloadFile()` 新增 `onAuthRefresh` 参数：下载过程中返回 401 时调用回调以重新建立下载会话（先刷新 nonce，再发送 BinaryInit）
+- `DownloadModel.endJobSuccess()` 方法：显式标记任务成功完成，解决此前通过 `text == "done"` 硬编码字符串判断成功的不可靠问题
 
 ### Changed
-- **Nonce refresh retry** — if Samsung returns a transient 401 between `BinaryInit` and the actual file download, the app regenerates the FUS nonce and retries (up to 3 times) instead of failing immediately
-- Refactored `Downloader.performDownload()` — moved file path resolution outside the try block, reduced nesting
-- **Chunk directory creation** — now uses `File.mkdirs()` to ensure `.bifrost_chunks` directory exists before downloading
+- **用 Ktor 流式下载替换 Ketch**：`FusClient.downloadFile()` 现直接使用 Ktor HTTP 客户端；移除 Ketch，因为它在下载前会发 HEAD 请求，消耗 FUS auth 并导致后续请求失败
+- **Nonce 刷新重试**：若三星在 `BinaryInit` 与实际文件下载之间返回瞬时 401，应用会重新生成 FUS nonce 并重试（最多 10 次，原为 3 次）而非立即失败；重试现在还覆盖 socket 超时和连接断开错误
+- **临时文件清理策略**：`DownloadModel.onEnd()` 现仅在成功或用户取消时清理临时文件；失败时保留已下载部分，以便下次尝试续传
+- 重构 `Downloader.performDownload()` — 将文件路径解析移出 try 块，减少嵌套
+- 在整个下载路径中添加 `[BifrostDownload]` 前缀的诊断日志
+- Gradle wrapper 版本升级到 9.6.1（与本地安装版本一致）
 
 ### Fixed
-- Removed unused `jvmToolchain` from `common/build.gradle.kts` and `desktop/build.gradle.kts`
-- Added `java.sql` module to desktop JVM module list (required by SQLite/Ketch)
-- Removed debug `println` of auth token from Ketch `DownloadRequest` headers
-- **Chunk directory not created** — fixed issue where `.bifrost_chunks` directory was not being created, causing all chunks to be skipped
-- **Resume download not starting** — fixed issue where clicking resume button only closed the dialog without actually starting the download
-- **Pre-download CRC check logic** — optimized to skip check when starting fresh download, only verify when file already exists with expected size
-- **Coroutine deadlock in FusClient** — fixed `stateMutex` reentrancy causing UI freeze when clicking download/check-update buttons
-- **ChunkState serialization** — removed `@Transient` annotation from `status` field, added `@Serializable` to enums for proper state persistence
-- **Progress update frequency** — added 500ms throttle to reduce UI recompositions during download
-- **FileManager SwingUtilities error** — removed `invokeAndWait` call on EDT to prevent `Cannot call invokeAndWait from the event dispatcher thread` error
-- **SLF4J logging configuration** — added system properties and JVM args to output debug logs to `~/bifrost_debug.log` file
-- **Large file chunk sizing** — confirmed support for up to 4GB chunks to reduce authentication failures for files >5GB
+- 从 `common/build.gradle.kts` 和 `desktop/build.gradle.kts` 移除未使用的 `jvmToolchain`
+- 将 `java.sql` 模块加入桌面端 JVM 模块列表（SQLite 所需）
+- 从下载请求头中移除 auth token 的调试 `println`
+- `FusClient.nonce` / `auth` / `sessionId` 字段添加 `@Volatile` 注解，确保协程跨线程可见性
+- `desktop/build.gradle.kts` Skiko 路径检测改为跨平台（支持 macOS / Linux / Windows）
+- `ParallelDownloader` 添加 `@Deprecated` 标注（多线程下载速度不稳定，已改用单线程流式下载）
+- `getAuthV()` 修复变量遮蔽问题（本地 nonce 重命名为 `effectiveNonce`）
+- 连接断开异常检查排除 `FileSystemException`，避免将文件系统权限错误误判为可恢复的网络错误
 
 ---
 
 # 2.1.0
-- Add an option on Android to use the File framework (requires All Files Access, find it in the Settings tab).
-- Improve firmware version matching for model variants with multiple variant characters (e.g., SM-J710FN).
-- Implement a new endpoint for checking for the latest firmware version.
-- Use that same endpoint for showing firmware history instead of scraping Samfrew.
+- 在 Android 上增加使用 File 框架的选项（需要 All Files 访问权限，在设置标签页中查看）。
+- 改进对具有多个变体字符的型号（如 SM-J710FN）的固件版本匹配。
+- 实现新的端点用于检查最新固件版本。
+- 使用同一端点显示固件历史，而非抓取 Samfrew。
 
 # 2.0.0
-This release has some pretty big changes, so Bifrost is being bumped to v2. Read more below.
-- It's now possible to download firmware without providing an IMEI or serial again!
-  - TAC submissions are still welcome and encouraged; I don't know if or when Samsung will block this.
-- The same changes also allow downloading most watch firmware. Some CSCs don't have firmware available, so if you see an error, try a different CSC.
-- Manually downloading old firmware versions should also be possible again. This won't work for all devices or firmware versions, but you shouldn't be forced to download the latest anymore.
-- Downloads now use multiple simultaneous connections for faster speeds.
-  - Android has to download to Bifrost's internal data first and then copy it to the chosen directory to support multiple connections. This seems to still be faster than a single connection and a direct download, but it's subject to change.
-- Update TACs.
+此版本有一些较大的变动，因此 Bifrost 升级到 v2。详情见下。
+- 现在可以再次在无需提供 IMEI 或序列号的情况下下载固件！
+  - 仍欢迎并鼓励提交 TAC；我不确定三星是否会或何时封锁此方式。
+- 同样的改动也允许下载大多数手表固件。某些 CSC 没有可用固件，因此如果看到错误，请尝试其他 CSC。
+- 手动下载旧固件版本也应再次可用。这并非对所有设备或固件版本都有效，但你不再被强制只能下载最新版。
+- 下载现在使用多个同时连接以提升速度。
+  - Android 必须先下载到 Bifrost 的内部数据目录，再复制到所选目录以支持多连接。这似乎仍比单连接直连更快，但可能会有变化。
+- 更新 TAC。
 
 # 1.20.5
-- Decryption and file verification should now be much faster.
-- Remember scroll position when closing and reopening CSC selector dialog.
-- Fix History fetching.
-- Update TACs.
-- Update dependencies.
+- 解密和文件校验现在应快很多。
+- 关闭并重新打开 CSC 选择器对话框时记住滚动位置。
+- 修复历史记录获取。
+- 更新 TAC。
+- 更新依赖。
 
 # 1.20.4
-- Improve error messages for invalid CSCs or missing firmware.
-- Update transparent appearance on macOS 26.
-- Fix some crashes.
-- Update TACs.
-- Update dependencies.
+- 改进无效 CSC 或缺失固件的错误提示。
+- 在 macOS 26 上更新透明外观。
+- 修复若干崩溃。
+- 更新 TAC。
+- 更新依赖。
 
 # 1.20.3
-- Add support for running on iOS.
-- Add a donate button to the About page.
-- Fix issue with audio library dependencies on Debian.
-- Remember CSC dialog state (search content, sorting) while app is running.
-- Make download response text selectable.
-- Update logic to show download warning for SM-L* watches as well as SM-R* devices.
-- Add TACs.
+- 增加在 iOS 上运行的支持。
+- 在关于页面增加捐赠按钮。
+- 修复 Debian 上音频库依赖的问题。
+- 应用运行期间记住 CSC 对话框状态（搜索内容、排序）。
+- 使下载响应文本可选。
+- 更新逻辑，对 SM-L* 手表及 SM-R* 设备都显示下载警告。
+- 增加 TAC。
 
 # 1.20.2
-- Fix an issue where picking directories on Linux might just not do anything.
-- Work on addressing an issue where moving the window across displays would cause it to reset.
-- Update TACs.
-- UI tweaks.
+- 修复在 Linux 上选择目录可能毫无反应的问题。
+- 致力于解决移动窗口跨显示器时会重置的问题。
+- 更新 TAC。
+- UI 调整。
 
 # 1.20.1
-- Update FileKit to fix an issue where confirming the save dialog wouldn't work on Linux.
-- Update Compose.
-- Add TACs.
+- 更新 FileKit，修复在 Linux 上确认保存对话框无效的问题。
+- 更新 Compose。
+- 增加 TAC。
 
 # 1.20.0
-- Add option on macOS to enable Vibrancy effect.
-- Update TACs.
-- Fix crashes.
-- Fix some UI issues.
+- 在 macOS 上增加启用 Vibrancy 效果的选项。
+- 更新 TAC。
+- 修复崩溃。
+- 修复一些 UI 问题。
 
 # 1.19.9
-- Fix crashes caused by opening some dialogs.
+- 修复打开某些对话框导致的崩溃。
 
 # 1.19.8
-- Switch to Samfrew for firmware history.
-- Avoid a crash when checking for history multiple times.
-- Fix a crash caused by dragging an invalid file to the window on desktop.
-- Work on performance and efficiency of I/O functions.
-- Add and update TACs.
+- 切换到 Samfrew 获取固件历史。
+- 避免多次检查历史时崩溃。
+- 修复在桌面端将无效文件拖到窗口导致的崩溃。
+- 提升 I/O 函数的性能与效率。
+- 增加并更新 TAC。
 
 # 1.19.7
-- Fix a crash.
+- 修复一个崩溃。
 
 # 1.19.6
-- Add native Windows ARM64 support.
-- Don't treat U and U1 variants as the same when generating IMEIs.
-- Fix some changelog parsing issues.
-- Update TACs.
-- Update translations.
-- Update dependencies.
+- 增加 Windows ARM64 原生支持。
+- 生成 IMEI 时不再将 U 和 U1 变体视为相同。
+- 修复一些更新日志解析问题。
+- 更新 TAC。
+- 更新翻译。
+- 更新依赖。
 
 # 1.19.5
-- Fix an issue where checking whether Bifrost is running in emulated x86 on ARM Windows would cause crashes on older Windows versions.
-- Fix an issue where retrieving the accent color on Windows would crash the app on older Windows versions.
-- Add more TACs.
-- Update translations.
-- Update dependencies.
+- 修复在较旧 Windows 版本上检查 Bifrost 是否在 ARM Windows 上以 x86 模拟运行时导致崩溃的问题。
+- 修复在较旧 Windows 版本上获取强调色导致应用崩溃的问题。
+- 增加更多 TAC。
+- 更新翻译。
+- 更新依赖。
 
 # 1.19.4
-- Work on file picker fixes for Linux.
-- Update translations.
-- Update TACs.
-- Update dependencies.
+- 修复 Linux 文件选择器问题。
+- 更新翻译。
+- 更新 TAC。
+- 更新依赖。
 
 # 1.19.3
-- File management improvements for better UX and to fix some issues in 1.19.2.
-- Remove option to show Mica effect on Windows since it's broken.
-- Add TACs.
-- Update translations.
+- 文件管理改进，提升 UX 并修复 1.19.2 中的一些问题。
+- 移除在 Windows 上显示 Mica 效果的选项（因已损坏）。
+- 增加 TAC。
+- 更新翻译。
 
 # 1.19.2
-- Fix issues launching on ARM Windows.
-- Fix blank file picker window on Linux.
-- Theme detection fixes for Linux.
+- 修复在 ARM Windows 上启动的问题。
+- 修复 Linux 上文件选择器窗口空白。
+- Linux 主题检测修复。
 
 # 1.19.1
-- Graphics fixes on Linux.
-- Update TACs.
-- Update dependencies.
+- Linux 图形修复。
+- 更新 TAC。
+- 更新依赖。
 
 # 1.19.0
-- Add in-app update checking.
-- Update translations.
-- UI tweaks.
-- Update error reporting.
+- 增加应用内更新检查。
+- 更新翻译。
+- UI 调整。
+- 更新错误报告。
 
 # 1.18.15
-- Fix launching on Windows inside non-ASCII paths by updating to Java 21.
-- Reduce CPU usage when downloading firmware.
-- Update dependencies.
+- 通过更新到 Java 21 修复在非 ASCII 路径下于 Windows 启动的问题。
+- 降低下载固件时的 CPU 占用。
+- 更新依赖。
 
 # 1.18.14
-- Work around an issue causing the app to crash on Raspberry Pis on launch.
-- Update translations.
-- Update dependencies.
+- 解决在 Raspberry Pi 上启动时应用崩溃的问题。
+- 更新翻译。
+- 更新依赖。
 
 # 1.18.13
-- UI tweaks.
-- Update Compose.
-- Add more TACs.
-- Add "About Bifrost" handler on macOS so it doesn't show the default Java window.
+- UI 调整。
+- 更新 Compose。
+- 增加更多 TAC。
+- 在 macOS 上增加 "About Bifrost" 处理器，使其不再显示默认 Java 窗口。
 
 # 1.18.12
-- Disable console window on Windows.
-- UI tweaks.
-- Remove Twitter links.
-- Update TACs.
-- Update dependencies.
+- 在 Windows 上禁用控制台窗口。
+- UI 调整。
+- 移除 Twitter 链接。
+- 更新 TAC。
+- 更新依赖。
 
 # 1.18.11
-- Fix a crash on Android pre-8.0 related to date parsing.
-- Fix a crash on desktop related to accessibility APIs.
-- Improve edge-to-edge appearance on Android.
-- Add some more TACs.
-- Update dependencies.
+- 修复 Android 8.0 之前与日期解析相关的崩溃。
+- 修复桌面端与无障碍 API 相关的崩溃。
+- 改进 Android 上的 edge-to-edge 外观。
+- 增加更多 TAC。
+- 更新依赖。
 
 # 1.18.10
-- Bifrost will now attempt to fetch firmware changelogs in the app's current language.
-- Replace manual HTML format parsing for changelogs with a proper library.
-- Hopefully improve error reporting on desktop.
-- Ignore some more errors.
-- Fix an issue where accessory download errors weren't properly ignored.
-- Trim firmware request body values.
-- Remove some JVM-specific APIs in common code.
-- Update Kotlin.
-- Update Compose.
+- Bifrost 现在会尝试以应用当前语言获取固件更新日志。
+- 用合适的库替换更新日志的手动 HTML 格式解析。
+- 希望改进桌面端错误报告。
+- 忽略更多错误。
+- 修复配件下载错误未正确忽略的问题。
+- 修剪固件请求体值。
+- 移除公共代码中的一些 JVM 专属 API。
+- 更新 Kotlin。
+- 更新 Compose。
 
 # 1.18.9
-- Fix an issue where closing the window on macOS wouldn't quit the app.
+- 修复在 macOS 上关闭窗口时未退出应用的问题。
 
 # 1.18.8
-- Work on improving error reporting on desktop.
-- Update Compose.
-- Update AGP.
-- Update Gradle.
-- Update TACs.
-- Code cleanup.
+- 改进桌面端错误报告。
+- 更新 Compose。
+- 更新 AGP。
+- 更新 Gradle。
+- 更新 TAC。
+- 代码清理。
 
 # 1.18.7
-- Fix an issue where the window on desktop would flash when closing the app.
-- Fix strings with apostrophes showing backslashes.
-- Update Compose.
-- Update Kotlin.
-- Clean up error reporting.
+- 修复桌面端关闭应用时窗口闪烁的问题。
+- 修复带撇号的字符串显示反斜杠。
+- 更新 Compose。
+- 更新 Kotlin。
+- 清理错误报告。
 
 # 1.18.6
-- Fix live URLs for CSCs and TACs.
-- Add workaround for proper dynamic colors on One UI 6.
-- Cleanup.
+- 修复 CSC 和 TAC 的实时 URL。
+- 为 One UI 6 上的正确动态颜色添加变通方案。
+- 清理。
 
 # 1.18.5
-- Crash fixes.
-- Update to Kotlin 2.0.0.
-- Update Compose.
-- Update TACs.
-- Update dependencies.
-- Clean up some unneeded dependencies.
+- 崩溃修复。
+- 更新到 Kotlin 2.0.0。
+- 更新 Compose。
+- 更新 TAC。
+- 更新依赖。
+- 清理一些不需要的依赖。
 
 # 1.18.4
-- Only show TAC info and report button if the device has an IMEI.
-- Fix a few crashes.
-- Update translations.
-- Clean up error reporting.
+- 仅在设备有 IMEI 时显示 TAC 信息和报告按钮。
+- 修复若干崩溃。
+- 更新翻译。
+- 清理错误报告。
 
 # 1.18.3
-- Hotfix for desktop build.
+- 桌面端构建热修复。
 
 # 1.18.2
-- Fix an issue where the version mismatch alert would be ignored and the download initiated anyway.
-- Fix false positives for version mismatch detection.
-- Update TACs.
-- Update Compose.
-- Update translations.
+- 修复版本不匹配警报被忽略仍发起下载的问题。
+- 修复版本不匹配检测的误报。
+- 更新 TAC。
+- 更新 Compose。
+- 更新翻译。
 
 # 1.18.1
-- Work on standalone decryption reliability by unifying the the request logic with the downloader's.
-- Update translations.
-- More error report filtering.
+- 通过将请求逻辑与下载器统一，改进独立解密可靠性。
+- 更新翻译。
+- 更多错误报告过滤。
 
 # 1.18.0
-- Add setting to save firmware decryption key during download that can be used for offline decryption later on.
-- Add "Decryption Key" field to Decrypter field that can be used to decrypt offline.
-- Work on online decrypt request cleanups.
-- More work on download speeds.
-- Reduce error reporting.
-- Update TACs.
-- Update Translations.
+- 增加在下载期间保存固件解密密钥的设置，可在之后离线解密使用。
+- 在解密器中增加"解密密钥"字段，可离线解密。
+- 改进在线解密请求清理。
+- 进一步提升下载速度。
+- 减少错误报告。
+- 更新 TAC。
+- 更新翻译。
 
 # 1.17.11
-- Fix cleartext errors on Android.
-- Fix some more issues with served version check.
-- Add some rate limiting to try to avoid Samsung's captcha when iterating through generated IMEIs.
-- Update translations.
-- Reduce error reporting.
+- 修复 Android 上的明文错误。
+- 修复已服务版本检查的一些问题。
+- 增加速率限制，尝试避免遍历生成的 IMEI 时触发三星的验证码。
+- 更新翻译。
+- 减少错误报告。
 
 # 1.17.10
-- Download and decrypt speeds should be improved in most cases.
-- Fix an issue where the served version check would fail and cause the download to fail.
-- Add a warning when entering a model number beginning with "SM-R", noting that only tablet and phone firmware can be downloaded.
-- Surface some download errors in the UI that previously caused crashes.
-- Use Ksoup for XML parsing to avoid some crashes with malformed responses.
-- Add more TACs.
-- Update translations.
-- Update dependencies.
-- Update Compose.
+- 下载和解密速度在大多数情况下应有所提升。
+- 修复已服务版本检查失败导致下载失败的问题。
+- 增加输入以 "SM-R" 开头型号时的警告，指出只能下载平板和手机固件。
+- 将之前导致崩溃的下载错误显示在 UI 中。
+- 使用 Ksoup 进行 XML 解析，避免响应格式错误导致的崩溃。
+- 增加更多 TAC。
+- 更新翻译。
+- 更新依赖。
+- 更新 Compose。
 
 # 1.17.9
-- UI fixes.
-- Update translations.
-- Add more TACs.
-- Crash fixes.
+- UI 修复。
+- 更新翻译。
+- 增加更多 TAC。
+- 崩溃修复。
 
 # 1.17.8
-- Add a clearer message for error 408, returned when an invalid IMEI or serial is given.
-- Add another dummy serial for IMEI generation.
-- Add more TACs.
-- Clean up some TAC associations.
-- Update dialog implementation.
-- Crash fixes.
-- Update translations.
+- 为无效 IMEI 或序列号返回的 408 错误增加更清晰的提示。
+- 增加 IMEI 生成的另一个虚拟序列号。
+- 增加更多 TAC。
+- 清理一些 TAC 关联。
+- 更新对话框实现。
+- 崩溃修复。
+- 更新翻译。
 
 # 1.17.7
-- Add 011111 dummy serial since 123456 and 012345 aren't working for everything anymore.
-- Add TACs for US S24.
-- TAC cleanup.
-- Update translations.
+- 因 123456 和 012345 不再适用于所有情况，增加 011111 虚拟序列号。
+- 增加美国 S24 的 TAC。
+- TAC 清理。
+- 更新翻译。
 
 # 1.17.6
-- Fix a crash on Android when retrieving the device IMEI.
-- Hide TAC info when TAC is blank.
-- UI tweaks.
-- Update Compose.
-- Update TACs.
-- Update translations.
+- 修复 Android 上获取设备 IMEI 时的崩溃。
+- TAC 为空时隐藏 TAC 信息。
+- UI 调整。
+- 更新 Compose。
+- 更新 TAC。
+- 更新翻译。
 
 # 1.17.5
-- Clear status text and current changelog when checking for latest firmware again.
-- Work on fixing crashes on Android related to the downloader Service.
-- Make some more strings translatable.
-- Add German translation.
-- Add Chinese (Simplified) translation.
-- Add complete Turkish translation.
-- Crash fixes.
-- More TAC cleanup.
-- Code cleanup.
+- 再次检查最新固件时清除状态文本和当前更新日志。
+- 修复 Android 上与下载器 Service 相关的崩溃。
+- 使更多字符串可翻译。
+- 增加德语翻译。
+- 增加简体中文翻译。
+- 增加完整的土耳其语翻译。
+- 崩溃修复。
+- 更多 TAC 清理。
+- 代码清理。
 
 # 1.17.4
-- Attempt to fix a crash after checking for updates on Android.
-- Attempt to fix a crash when loading the app icon on Windows and Linux.
-- Add French translation.
-- Add partial Turkish translation.
-- Add scroll indicators.
-- Iconify tab navigation buttons when text overflows.
-- Improve error reports.
-- UI fixes.
+- 尝试修复 Android 上检查更新后崩溃的问题。
+- 尝试修复 Windows 和 Linux 上加载应用图标时崩溃的问题。
+- 增加法语翻译。
+- 增加部分土耳其语翻译。
+- 增加滚动指示器。
+- 文本溢出时将标签页导航按钮图标化。
+- 改进错误报告。
+- UI 修复。
 
 # 1.17.3
-- Add ability to drag a file from the file explorer to the file field in the Decrypt view.
-- Add ability to set per-app locale for Bifrost on Android.
-- Fix an issue where settings text was rendering in the wrong color.
-- Add Spanish translations.
-- Add Portuguese translations.
-- Code cleanup.
+- 增加将文件从文件管理器拖到解密视图文件字段的能力。
+- 增加在 Android 上为 Bifrost 设置应用内语言的能力。
+- 修复设置文本渲染颜色错误的问题。
+- 增加西班牙语翻译。
+- 增加葡萄牙语翻译。
+- 代码清理。
 
 # 1.17.2
-- Fix a crash on Android when trying to display a progress bar.
+- 修复 Android 上尝试显示进度条时的崩溃。
 
 # 1.17.1
-- Make scrolling between pages less choppy.
-- Fix corrupt characters when displaying Samsung server result after errors.
-- Add some more TACs.
-- Fix Weblate translation state.
-- Move from Jsoup to Ksoup for HTML parsing.
-- Update Compose.
-- Lots of code cleanup.
+- 使页面间滚动更流畅。
+- 修复错误后显示三星服务器结果时的字符损坏。
+- 增加更多 TAC。
+- 修复 Weblate 翻译状态。
+- 从 Jsoup 迁移到 Ksoup 进行 HTML 解析。
+- 更新 Compose。
+- 大量代码清理。
 
 # 1.17.0
-- Add option on Windows 11 to apply Mica effect.
-- Add accent color detection for KDE and LXDE (requires app restart to respond to changes).
-- Add a generic font mapping utility to improve render reliability on Linux.
-- Fix wonky window styling on Windows 10.
-- Crash fixes.
-- Code cleanup.
-- Add some TACs for the S24 Ultra (U/U1, B).
-- Clean up TAC database.
+- 在 Windows 11 上增加应用 Mica 效果的选项。
+- 增加 KDE 和 LXDE 的强调色检测（需重启应用以响应变化）。
+- 增加通用字体映射工具，提升 Linux 上的渲染可靠性。
+- 修复 Windows 10 上窗口样式问题。
+- 崩溃修复。
+- 代码清理。
+- 增加 S24 Ultra（U/U1、B）的一些 TAC。
+- 清理 TAC 数据库。
 
 # 1.16.14
-- Implement a workaround to prevent the cursor from skipping around in text fields until the Compose API is updated.
+- 实现一个变通方案，在 Compose API 更新前防止文本字段中光标跳动。
 
 # 1.16.13
-- Fix sorting in CSC picker.
-- Reduce dummy IMEI serials to just 123456 and 012345.
-- Fix an issue where the saved IMEI/Serial field value would be overwritten on startup.
-- Update window style on Windows.
-- Fix some backslashes showing up in text where they shouldn't.
-- Improve download reliability when Bifrost is open and inactive for a while.
-- Add some more TACs.
-- Crash fixes.
+- 修复 CSC 选择器中的排序。
+- 将虚拟 IMEI 序列号减少到仅 123456 和 012345。
+- 修复启动时覆盖已保存 IMEI/序列号字段值的问题。
+- 更新 Windows 上的窗口样式。
+- 修复文本中不应出现的反斜杠。
+- 提升 Bifrost 打开且长时间不活动时的下载可靠性。
+- 增加更多 TAC。
+- 崩溃修复。
 
 # 1.16.12
-- Fix a crash on Android.
+- 修复 Android 上的崩溃。
 
 # 1.16.11
-- Add edit dialog to IMEI field and change how the field displays.
-- Crash fixes.
-- Layout fixes.
-- Move CSC database to a CSV file for easier access by others.
-- Add logic to fetch remote CSC database so CSCs can be added without version updates.
+- 在 IMEI 字段增加编辑对话框并更改字段显示方式。
+- 崩溃修复。
+- 布局修复。
+- 将 CSC 数据库迁移到 CSV 文件，方便他人访问。
+- 增加获取远程 CSC 数据库的逻辑，无需版本更新即可添加 CSC。
 
 # 1.16.10
-- Crash fixes.
-- Update CSC DB.
-- Limit generated IMEIs to 10.
+- 崩溃修复。
+- 更新 CSC 数据库。
+- 将生成的 IMEI 限制为 10 个。
 
 # 1.16.9
-- Rework settings model to hopefully reduce text scrambling.
-- Add an option under "More" to delete settings data.
+- 重做设置模型，希望能减少文本错乱。
+- 在"更多"下增加删除设置数据的选项。
 
 # 1.16.8
-- Add more TACs.
-- Rely on local TAC DB while remote is being fetched.
-- Rework parsing logic to allow for multiple TACs per model.
-- Add more dummy serials to try.
-- Add retry logic to loop through all provided IMEIs until one works.
+- 增加更多 TAC。
+- 远程获取期间依赖本地 TAC 数据库。
+- 重做解析逻辑以支持每个型号多个 TAC。
+- 增加更多虚拟序列号尝试。
+- 增加重试逻辑，遍历所有提供的 IMEI 直到有一个可用。
 
 # 1.16.7
-- Add some more TACs.
-- Fetch the latest TACs database from GitHub if possible to avoid having to update Bifrost when new TACs are added.
+- 增加更多 TAC。
+- 尽可能从 GitHub 获取最新 TAC 数据库，避免新增 TAC 时必须更新 Bifrost。
 
 # 1.16.6
-- Add database of IMEI TACs for generating IMEIs based on entered model.
-  - If the entered model is in the database, an IMEI should be automatically filled.
-- Add section to "More" page on Android to show TAC and model and allow copying.
-  - Please [open an issue](https://github.com/zacharee/SamloaderKotlin/issues/new?assignees=&labels=&projects=&template=imei-database-request.md&title=) if your IMEI is not being automatically filled with your TAC and model.
+- 增加基于输入型号生成 IMEI 的 IMEI TAC 数据库。
+  - 如果输入的型号在数据库中，应自动填充 IMEI。
+- 在 Android 的"更多"页面增加显示 TAC 和型号并允许复制的区块。
+  - 如果你的 IMEI 未用 TAC 和型号自动填充，请[提交 issue](https://github.com/zacharee/SamloaderKotlin/issues/new?assignees=&labels=&projects=&template=imei-database-request.md&title=)。
 
 # 1.16.5
-- Add an IMEI/Serial field that needs to be filled with a value that matches the requested firmware.
+- 增加 IMEI/序列号字段，需填入与请求固件匹配的值。
 
 # 1.16.4
-- Implement a way to use the modern native Windows file picker.
-- Move footer and settings to a dedicated page.
-- Add descriptions for settings.
-- Move page tabs to the bottom.
-- Desktop now scrolls pages like on Android.
-- Update style of firmware changelogs.
-- Rework HTML parsing for changelogs.
-- Fix an issue where the history page wasn't displaying properly on Android.
-- Fix an issue where Manual mode could be toggled while a download was in progress.
-- Fix styling for the non-native file picker.
-- Remove About and Supporters windows on desktop.
-- Make progress bar animations smoother.
-- Enable the native file picker by default.
-- Fix rounded app icon.
-- Add proper macOS app icon.
-- Android APK name is now lowercase.
-- Code cleanup.
+- 实现使用现代原生 Windows 文件选择器。
+- 将页脚和设置移至专用页面。
+- 增加设置说明。
+- 将页面标签移至底部。
+- 桌面端现在像 Android 一样滚动页面。
+- 更新固件更新日志样式。
+- 重做更新日志的 HTML 解析。
+- 修复 Android 上历史记录页面显示不正常的问题。
+- 修复下载进行中可切换手动模式的问题。
+- 修复非原生文件选择器的样式。
+- 移除桌面端的 About 和 Supporters 窗口。
+- 使进度条动画更流畅。
+- 默认启用原生文件选择器。
+- 修复圆角应用图标。
+- 增加合适的 macOS 应用图标。
+- Android APK 名称改为小写。
+- 代码清理。
 
 # 1.16.3
-- Add a likely-temporary workaround to download firmware.
-- Improve error reporting again.
-- Crash fixes.
+- 增加一个可能是临时的变通方案来下载固件。
+- 再次改进错误报告。
+- 崩溃修复。
 
 # 1.16.2
-- Hopefully fix theme weirdness on Windows.
+- 希望修复 Windows 上的主题异常。
 
 # 1.16.1
-- Update styling on macOS and Windows to include the title bar.
-- Implement better dark mode detection for Linux.
-- Add automatic dark/light mode changes for desktop.
-- Update Gradle.
+- 在 macOS 和 Windows 上更新样式以包含标题栏。
+- 为 Linux 实现更好的暗色模式检测。
+- 增加桌面端自动暗色/亮色模式切换。
+- 更新 Gradle。
 
 # 1.16.0
-- Add option to automatically delete encrypted download file.
-- Fix EUX and EUY region downloads (thanks [@ananjaser1211](https://github.com/ananjaser1211)).
-- Fix some crashes on desktop.
-- Update Bugsnag error reporting to show some more info.
-- Hopefully reduce download size slightly by removing unused libraries.
+- 增加自动删除加密下载文件的选项。
+- 修复 EUX 和 EUY 区域下载（感谢 [@ananjaser1211](https://github.com/ananjaser1211)）。
+- 修复桌面端一些崩溃。
+- 更新 Bugsnag 错误报告以显示更多信息。
+- 希望通过移除未使用的库来稍微减小下载体积。
 
 # 1.15.2
-- Move to using Conveyor for desktop builds.
-  - ARM64 macOS builds are automatically generated.
-  - ARM64 Linux is now supported.
-- Update Android release file name to include version.
-- Use moko-resources for translations (preparation for later).
-- Update error reporting behavior.
-- Update Compose.
-- Performance fixes.
-- UI tweaks.
-- Remove native macOS and JS targets (never released).
+- 迁移到使用 Conveyor 构建桌面端。
+  - 自动生成 ARM64 macOS 构建。
+  - 现在支持 ARM64 Linux。
+- 更新 Android 发布文件名以包含版本号。
+- 使用 moko-resources 进行翻译（为后续做准备）。
+- 更新错误报告行为。
+- 更新 Compose。
+- 性能修复。
+- UI 调整。
+- 移除原生 macOS 和 JS 目标（从未发布）。
 
 # 1.15.1
-- Fix downloads for models without hyphens or with lowercase characters.
+- 修复无连字符或含小写字符的型号下载。
 
 # 1.15.0
-- macOS builds should now be fully signed and notarized!
-- Add option to allow lowercase characters in text fields.
-- Persist model/region/firmware/manual values across app restarts.
-- Work on text field input performance.
-- Update dependencies.
+- macOS 构建现在应完全签名并公证！
+- 增加允许文本字段中小写字符的选项。
+- 应用重启后持久化型号/区域/固件/手动值。
+- 改进文本字段输入性能。
+- 更新依赖。
 
 # 1.14.3
-- Fix a crash on launch on desktop.
-- Migrate to Korlibs 4.
-- Fix harmless SLF4J error.
-- Other crash fixes.
+- 修复桌面端启动崩溃。
+- 迁移到 Korlibs 4。
+- 修复无害的 SLF4J 错误。
+- 其他崩溃修复。
 
 # 1.14.2
-- Fix downloads (#109) (thanks @ananjaser1211).
-- Add Bugsnag error reporting.
-- Update Compose to 1.5.10.
-- Update CSC options.
-- Add Bugsnag.
-- Fix some date formats (#112) (thanks @Tostis).
-- Add native ARM64 macOS build.
+- 修复下载 (#109)（感谢 @ananjaser1211）。
+- 增加 Bugsnag 错误报告。
+- 更新 Compose 到 1.5.10。
+- 更新 CSC 选项。
+- 增加 Bugsnag。
+- 修复一些日期格式 (#112)（感谢 @Tostis）。
+- 增加原生 ARM64 macOS 构建。
 
 # 1.14.1
-- Add some more CSCs.
-- Fix an issue with version checking preventing downloads.
-- Replace a bunch of model states with flows.
-- Don't allow the CSC picker dialog to change the current CSC while an operation is running.
+- 增加更多 CSC。
+- 修复版本检查阻止下载的问题。
+- 用 flow 替换一批型号状态。
+- 操作运行时不允许 CSC 选择器对话框更改当前 CSC。
 
 # 1.14.0
-- Avoid a crash when parsing Patreon supporters fails.
-- Add a CSC picker dialog to make it easier to choose the right CSC or pick an alternative CSC.
-- Add Material You icon for Android 12+.
-- Tweak dialog behavior and UI.
-- Add Mastodon social link.
-- Move version info to dialog if screen width is below 600dp.
+- 避免解析 Patreon 支持者失败时崩溃。
+- 增加 CSC 选择器对话框，便于选择正确的 CSC 或挑选替代 CSC。
+- 为 Android 12+ 增加 Material You 图标。
+- 调整对话框行为和 UI。
+- 增加 Mastodon 社交链接。
+- 屏幕宽度低于 600dp 时将版本信息移至对话框。
 
 # 1.13.1
-- Fix crashes and UI issues on Android.
+- 修复 Android 上的崩溃和 UI 问题。
 
 # 1.13.0
-- The History view now uses LazyVerticalStaggeredGrid instead of a manual non-lazy implementation.
-- Upgrade to Kotlin 1.8.0 and Compose 1.3.x.
-- Add dynamic theming for Android, Windows, and macOS.
-- Move to Material Design 3.
-- Set minimum window dimensions to 200x300dp.
-- Work on pager performance on Android.
-- Decrease spacing between icon buttons in footer.
-- Show a loading indicator when fetching version info in the Download view.
-- Fix the last card in the History view being cut off.
-- Update dependencies.
+- 历史记录视图现在使用 LazyVerticalStaggeredGrid 而非手动非惰性实现。
+- 升级到 Kotlin 1.8.0 和 Compose 1.3.x。
+- 为 Android、Windows 和 macOS 增加动态主题。
+- 迁移到 Material Design 3。
+- 将最小窗口尺寸设为 200x300dp。
+- 改进 Android 上的 pager 性能。
+- 减小页脚图标按钮间距。
+- 在下载视图中获取版本信息时显示加载指示器。
+- 修复历史记录视图中最后一张卡片被截断的问题。
+- 更新依赖。
 
 # 1.12.0
-- Allow continuing download if Bifrost detects a version mismatch.
-- Improve version mismatch checking.
-- Improve dialog appearance.
-- Work on native macOS version.
-- Update dependencies.
+- 允许在 Bifrost 检测到版本不匹配时继续下载。
+- 改进版本不匹配检查。
+- 改进对话框外观。
+- 推进原生 macOS 版本。
+- 更新依赖。
 
 # 1.0.11
-- Another fix for Windows resources.
+- 再次修复 Windows 资源问题。
 
 # 1.0.10
-- Temporarily remove translations until there's a better framework.
-- Update progress bar layout and add some more animations.
-- Implement functional browser version (still no plans to release it).
-- Improve file handle cleanup.
-- Add history fallback using Samsung's version.xml page.
-- Update dependencies.
-- Add temporary workaround for loading resources on Windows.
+- 暂时移除翻译，直到有更好的框架。
+- 更新进度条布局并增加更多动画。
+- 实现功能性的浏览器版本（仍无发布计划）。
+- 改进文件句柄清理。
+- 使用三星的 version.xml 页面增加历史记录回退。
+- 更新依赖。
+- 增加 Windows 资源加载的临时变通方案。
 
 # 1.0.9
-- Update dependencies.
-- Update to Kotlin 1.7.0.
-- Add Thai translation.
-- Fix issues with operations getting stuck/hanging.
-- Add some more animations.
-- Add some missing strings to resource files.
-- Create initial (non-functional) Compose versions for web and macOS native.
-- Make image resources properly cross-platform.
-- Fix build for Android and JVM.
+- 更新依赖。
+- 更新到 Kotlin 1.7.0。
+- 增加泰语翻译。
+- 修复操作卡住/挂起的问题。
+- 增加一些动画。
+- 增加一些缺失的字符串到资源文件。
+- 为 web 和 macOS 原生创建初始（非功能性）Compose 版本。
+- 使图片资源正确跨平台。
+- 修复 Android 和 JVM 的构建。
 
 # 1.0.8
-- Update dependencies.
-- Resize content for on-screen keyboard on Android.
-- Make JS version build again.
-- Implement a localization framework.
-- Add Russian translation.
-- Only show Settings gear if settings are available.
-- Use OpenGL renderer on Windows.
+- 更新依赖。
+- 在 Android 上为屏幕键盘调整内容大小。
+- 使 JS 版本再次可构建。
+- 实现本地化框架。
+- 增加俄语翻译。
+- 仅在设置可用时显示设置齿轮。
+- 在 Windows 上使用 OpenGL 渲染器。
 
 # 1.0.7
-- Update dependencies.
-- Extract strings to variables.
-- Fix an error when verifying served firmware.
-- Fix broken Windows icon.
+- 更新依赖。
+- 将字符串提取到变量。
+- 修复校验已服务固件时的错误。
+- 修复损坏的 Windows 图标。
 
 # 1.0.6
-- Update dependencies.
-- Clean up code.
-- Work around an issue with blank file pickers by using JFileChooser by default.
-- Add a new setting to switch back to using FileDialog.
-- Update build to JDK 18.
+- 更新依赖。
+- 清理代码。
+- 通过默认使用 JFileChooser 解决空白文件选择器问题。
+- 增加新设置以切回使用 FileDialog。
+- 将构建更新到 JDK 18。
 
 # 1.0.5
-- Make version comparison more reliable for manual mode.
+- 使手动模式的版本比较更可靠。
 
 # 1.0.4
-- Code cleanup.
-- Implement horizontal pager on Android for swiping between views.
-- Update Compose and Kotlin.
-- Re-enable manual firmware input:
-  - There's now a warning when enabled.
-  - Bifrost will verify that the requested firmware matches the served firmware.
-- Implement some better errors.
-- Fix a crash caused by 403 return statuses.
-- Fix a crash when the Samsung docs URL is null.
+- 代码清理。
+- 在 Android 上实现水平 pager 以在视图间滑动。
+- 更新 Compose 和 Kotlin。
+- 重新启用手动固件输入：
+  - 启用时会有警告。
+  - Bifrost 会校验请求的固件与已服务固件是否匹配。
+- 实现更好的错误提示。
+- 修复 403 返回状态导致的崩溃。
+- 修复 Samsung 文档 URL 为 null 时的崩溃。
 
 # 1.0.3
-- Implement some menu bar items for macOS.
-- Add a Patreon Supporters dialog.
-- Fix an issue where making HTTP requests would indefinitely hang.
-- Clean up code.
+- 为 macOS 实现一些菜单栏项。
+- 增加 Patreon 支持者对话框。
+- 修复 HTTP 请求无限挂起的问题。
+- 清理代码。
 
 # 1.0.2
-- Fix a crash on Linux and Windows caused by the About dialog.
+- 修复 About 对话框导致 Linux 和 Windows 崩溃的问题。
 
 # 1.0.1
-- Fix macOS package name.
-- Update file names.
+- 修复 macOS 包名。
+- 更新文件名。
 
 # 1.0.0
-- Rename to Bifrost.
-- Update icon and colors.
-- Fix up about dialog for macOS.
+- 重命名为 Bifrost。
+- 更新图标和颜色。
+- 修复 macOS 的 about 对话框。
 
 # 0.5.3
-- Update the Windowing API.
-- Update Kotlin to 1.5.31.
-- Update Compose to 1.0.0.
-- Fix some crashes on Android 12.
-- Remove reliance on manual DPScale.
-- Fix dark mode for macOS.
-- Add an about dialog for macOS.
-- Fix History View.
-- Code cleanup.
-- Create an experimental browser version (likely never will be live).
+- 更新窗口 API。
+- 更新 Kotlin 到 1.5.31。
+- 更新 Compose 到 1.0.0。
+- 修复 Android 12 上的一些崩溃。
+- 移除对手动 DPScale 的依赖。
+- 修复 macOS 的暗色模式。
+- 为 macOS 增加 about 对话框。
+- 修复历史记录视图。
+- 代码清理。
+- 创建实验性浏览器版本（可能永远不会上线）。
 
 # 0.5.2
-- Update dependencies.
-- Fix some crashes.
-- Properly handle changelogs in other languages.
+- 更新依赖。
+- 修复一些崩溃。
+- 正确处理其他语言的更新日志。
 
 # 0.5.1
-- Update dependencies.
-- Move from SamMobile to OdinRom for history tab.
-- Add release date to changelogs for history items.
-- Update appearance of some UI elements.
+- 更新依赖。
+- 历史记录标签从 SamMobile 迁移到 OdinRom。
+- 在历史项的更新日志中增加发布日期。
+- 更新一些 UI 元素的外观。
 
 # 0.5.0
-- Add changelog for current firmware and for items in history tab.
-- Use staggered grid for history tab (may cause performance issues).
+- 为当前固件和历史记录标签中的项增加更新日志。
+- 为历史记录标签使用交错网格（可能导致性能问题）。
 
 # 0.4.1
-- Remove dependence on Bintray.
-- Add back history tab without download buttons.
-- Fix a grid issue in history tab.
-- Code cleanup.
-- Fix crash on Android <8.0.
+- 移除对 Bintray 的依赖。
+- 恢复历史记录标签，但不带下载按钮。
+- 修复历史记录标签中的网格问题。
+- 代码清理。
+- 修复 Android <8.0 上的崩溃。
 
 # 0.4.0
-- Update dependencies.
-- Remove manual firmware downloads.
-- Remove history tab.
-- Clean up code.
+- 更新依赖。
+- 移除手动固件下载。
+- 移除历史记录标签。
+- 清理代码。
 
 # 0.3.2
-- Backend changes for better organization.
-- Make notification show progress on Android.
-- Update dependencies.
-- Add macOS build.
+- 后端重组以更好组织。
+- 在 Android 上使通知显示进度。
+- 更新依赖。
+- 增加 macOS 构建。
 
 # 0.3.1
-- Update dependencies.
-- Add ability to copy info from a history item to the download and decrypt pages. 
-- Show OS version text when checking for latest update.
-- Limit max content width.
+- 更新依赖。
+- 增加从历史项复制信息到下载和解密页面的能力。
+- 检查最新更新时显示 OS 版本文本。
+- 限制最大内容宽度。
 
 # 0.3.0
-- Add a new page for viewing the firmware history of a device and region combo.
-- Make some UI tweaks for better desktop display.
-- Decrease footer size.
-- Decrease some padding values.
-- Update dependencies.
+- 增加新页面用于查看设备和区域组合的固件历史。
+- 进行一些 UI 调整以改善桌面端显示。
+- 减小页脚大小。
+- 减小一些 padding 值。
+- 更新依赖。
 
 # 0.2.1
-- Fix the "Working..." notification not dismissing when closing the app.
+- 修复关闭应用时"Working..."通知不消失的问题。
 
 # 0.2.0
-- Update README with build instructions for Android.
-- Add MIT license.
-- Make main content scrollable.
-- Fix screen rotation breaking download.
-- Reorder some buttons.
-- Make layout slightly more responsive, with auto-flowing input fields and hybrid image/text buttons.
-- Add a hint to the firmware field for its format.
-- Run download/decrypt in a Service on Android.
-- Other misc UI tweaks.
+- 更新 README 以包含 Android 构建说明。
+- 增加 MIT 许可证。
+- 使主内容可滚动。
+- 修复屏幕旋转导致下载中断的问题。
+- 重新排列一些按钮。
+- 使布局略有响应性，带自动流式输入字段和混合图片/文本按钮。
+- 在固件字段增加格式提示。
+- 在 Android 上通过 Service 运行下载/解密。
+- 其他杂项 UI 调整。
 
 # 0.1.0
-Initial Release
+初始发布

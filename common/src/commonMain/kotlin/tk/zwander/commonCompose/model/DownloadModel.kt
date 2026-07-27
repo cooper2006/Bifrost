@@ -63,6 +63,12 @@ class DownloadModel : BaseModel("download_model") {
     private val _tempFiles = mutableListOf<IPlatformFile>()
 
     /**
+     * Flag set by [endJobSuccess] to mark the job as successfully completed.
+     * Checked in [onEnd] to decide whether to clean up temp files.
+     */
+    private var _jobSuccess = false
+
+    /**
      * Add a temporary file to the cleanup list.
      */
     fun addTempFile(file: IPlatformFile?) {
@@ -85,10 +91,23 @@ class DownloadModel : BaseModel("download_model") {
         _tempFiles.clear()
     }
 
+    /**
+     * Call this instead of [endJob] when the job completed successfully.
+     * Temp files will be cleaned up in [onEnd].
+     */
+    fun endJobSuccess(text: String) {
+        _jobSuccess = true
+        endJob(text)
+    }
+
     override fun onEnd(text: String) {
         super.onEnd(text)
-        downloadState.value = null
-        totalChunks.value = 0
-        completedChunks.value = 0
+        // Clean up temp files on success or cancellation (blank text).
+        // On failure, keep partially downloaded files for resume.
+        val shouldCleanup = _jobSuccess || text.isBlank()
+        if (shouldCleanup) {
+            cleanupTempFiles()
+        }
+        _jobSuccess = false
     }
 }

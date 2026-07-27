@@ -1,215 +1,198 @@
-# Notices
+# 致谢
 
-* Thank you [VanVuong41429](https://github.com/VanVuong41429) for contributing so many TACs!
-* Thank you [henr1kas](https://github.com/henr1kas) for the download method that doesn't require IMEIs!
+* 感谢 [VanVuong41429](https://github.com/VanVuong41429) 贡献了如此多的 TAC！
+* 感谢 [henr1kas](https://github.com/henr1kas) 提供了无需 IMEI 的下载方式！
 
-# Bifrost - Samsung Firmware Downloader
-This is yet another firmware downloader for Samsung devices, but it has some special features.
+# Bifrost - 三星固件下载器
+这又是一款用于三星设备的固件下载器，但它有一些特别的功能。
 
-For one, it's cross-platform. Bifrost runs on Windows, Linux, macOS, and even Android! 
+首先，它是跨平台的。Bifrost 可运行于 Windows、Linux、macOS，甚至 Android！
 
-Bifrost is also a graphical program, with a shared UI across all supported platforms.
+Bifrost 也是一个图形化程序，在所有支持的平台上共享同一套 UI。
 
-Most of the functionality in Bifrost is based on [Samloader](https://github.com/nlscc/samloader). The Python code has been converted to Kotlin and tweaked to take advantage of some of Kotlin's features.
+Bifrost 的大部分功能基于 [Samloader](https://github.com/nlscc/samloader)。其 Python 代码已被转换为 Kotlin，并经过调整以利用 Kotlin 的一些特性。
 
-Bifrost uses Jetpack Compose, JetBrains Compose for Desktop, and Kotlin Multiplatform to create a shared codebase for all supported platforms.
+Bifrost 使用 Jetpack Compose、JetBrains Compose for Desktop 和 Kotlin Multiplatform，为所有支持的平台创建共享代码库。
 
-# Support
+# 支持
 
-Enjoying the app? [Donate here](https://www.paypal.com/donate/?hosted_button_id=EWAPDSENZ7U44).
+喜欢这个应用？[在此捐赠](https://www.paypal.com/donate/?hosted_button_id=EWAPDSENZ7U44)。
 
-# Download
-For Windows, macOS, and Linux, you can download from https://bifrost.zwander.dev.
+# 下载
+对于 Windows、macOS 和 Linux，你可以从 https://bifrost.zwander.dev 下载。
 
-Check the [Releases page](https://github.com/zacharee/SamloaderKotlin/releases) for binaries.
+也可以在 [Releases 页面](https://github.com/zacharee/SamloaderKotlin/releases) 获取二进制文件。
 
-If you want to run this on iOS or use the iOS version on macOS, you can sign up for the TestFlight version [here](https://testflight.apple.com/join/PVmWZNZn).
+如果你想运行于 iOS 或在 macOS 上使用 iOS 版本，可以[在此](https://testflight.apple.com/join/PVmWZNZn)报名 TestFlight 版本。
 
-## Platform Compatibility
+## 平台兼容性
 
 |               | x86 | x86_64 | ARMv7 | ARM64 |
 |---------------|-----|--------|-------|-------|
 | Windows       | ❌   | ✅      | ❌     | ✅     |
 | macOS         | ❌   | ✅      | ❌     | ✅     |
 | Android       | ✅   | ✅      | ✅     | ✅     |
-| Debian-Based  | ❌   | ✅      | ❌     | ✅     |
-| Generic Linux | ❌   | ✅      | ❌     | ✅     |
+| Debian 系    | ❌   | ✅      | ❌     | ✅     |
+| 通用 Linux    | ❌   | ✅      | ❌     | ✅     |
 | iOS           | ❌   | ❌      | ❌     | ✅     |
 
-## Note for Linux
-Make sure you have at least one of the following font families from each category installed.
+## Linux 注意事项
+请确保已安装以下每个类别中至少一种字体系列。
 
-### Sans Serif
+### Sans Serif（无衬线）
 - Noto Sans
 - DejaVu Sans
 
-### Serif
+### Serif（衬线）
 - Noto Serif
 - DejaVu Serif
 - Times New Roman
 
-### Monospace
+### Monospace（等宽）
 - Noto Sans Mono
 - DejaVu Sans Mono
 
-### Cursive
+### Cursive（手写体）
 - Comic Sans MS
 
-# Changelog
-Release notes are available in [CHANGELOG.md](CHANGELOG.md).
+# 更新日志
+发布说明详见 [CHANGELOG.md](CHANGELOG.md)。
 
-# FAQ & Troubleshooting
+# 常见问题与故障排除
 
-## Bifrost isn't downloading watch firmware.
-Starting with v2.0.0, Bifrost can download most watch firmware. However, some regions/CSCs may not have firmware available. If you see an error, try a different region/CSC.
+## Bifrost 无法下载手表固件
+遗憾的是，三星不提供手表的完整固件文件，因此 Bifrost 无法下载它们。
 
-## Bifrost is returning error 400/401 when downloading
-These errors are on Samsung's end. If you can, try using a different region/CSC.
+## Bifrost 下载时返回 400/401 错误
+这些错误来自三星服务器端。如果可以，尝试使用不同的区域/CSC。
 
-## Bifrost is returning error 403 when checking for updates
-These errors are on Samsung's end. Samsung may no longer be serving firmware for your device or may not have started serving firmware yet. Try a different region/CSC if possible and check to make sure your model number is correct.
+## Bifrost 检查更新时返回 403 错误
+这些错误来自三星服务器端。三星可能已停止为你的设备提供固件，或尚未开始提供。请检查型号是否正确，或尝试不同的区域/CSC。
 
-## Bifrost opens to a blank screen on Windows
-On certain GPUs, Jetpack Compose/Skia has trouble rendering. Try running the program as an administrator.
+## Bifrost 在 Windows 上打开后是空白屏幕
+在某些 GPU 上，Jetpack Compose/Skia 会出现渲染问题。尝试以管理员身份运行程序。
 
-If you have switchable graphics, try using a different GPU.
+如果你的电脑有可切换显卡，尝试使用其他 GPU。
 
-## Download speeds are slow
-Samsung's servers sometimes throttle downloads to about 3MiB/s. For older devices, you may see even slower speeds. Different regions/CSCs may have faster downloads.
+## 下载速度慢
+三星服务器有时会将下载限速到约 3MiB/s。对于较老的设备，速度可能更慢。不同的区域/CSC 可能有更快的下载速度。
 
-## How do I know which CSC to use?
-On your device, do the following:
-1. Open the Settings app.
-2. Scroll down to "About phone" or "About tablet" and tap it.
-3. Tap "Software information".
-4. Scroll down to "Service provider software version".
-5. You'll see something like "XAA/XAA,XAA/XAU/TMB" or "XAR/XAR/" on the second line.
+## 如何知道该用哪个 CSC？
+在设备上执行以下操作：
+1. 打开"设置"应用。
+2. 向下滚动到"关于手机"或"关于平板"并点击。
+3. 点击"软件信息"。
+4. 向下滚动到"服务提供商软件版本"。
+5. 你会在第二行看到类似 "XAA/XAA,XAA/XAU/TMB" 或 "XAR/XAR/" 的内容。
 
-The first three letters there are your current CSC. The last three letters are the original/firmware CSC of your device.  
-Using the above examples, the first has a current CSC of XAA and a firmware CSC of TMB. The second has a current CSC of XAR and a firmware CSC of XAR.
+前三个字母就是你当前的 CSC。最后三个字母是你设备的原始/固件 CSC。
+以上述示例为例，第一个的当前 CSC 是 XAA，固件 CSC 是 TMB。第二个的当前 CSC 是 XAR，固件 CSC 也是 XAR。
 
-## How do I choose an alternative CSC if mine isn't working?
-Use the CSC picker dialog (the button that looks like a list inside the "Region" text field).  
-You can search for your country or region in there and see the different CSCs used. If there are specific carriers associated with a CSC, they'll also be shown.
+## 如果我的 CSC 不可用，如何选择替代 CSC？
+使用 CSC 选择器对话框（"区域"文本框中看起来像列表的按钮）。
+你可以在其中搜索你的国家或地区，并查看所使用的不同 CSC。如果某个 CSC 关联了特定运营商，也会一并显示。
 
-## Why is my antivirus flagging the app?
-Certain antivirus programs may flag Bifrost as malware. This is (hopefully obviously) a false positive.
+## 为什么我的杀毒软件会标记此应用？
+某些杀毒软件可能将 Bifrost 标记为恶意软件。这（希望显然）是误报。
 
-There's a trojan horse malware family named Bifrost, which is part of the greater Bifrose family.  
-Antivirus programs flagging Bifrost (this app) seem to be doing it solely based on this app having the same name as the malware.
+有一个名为 Bifrost 的木马恶意软件家族，属于更大的 Bifrose 家族。
+杀毒软件标记 Bifrost（本应用）似乎仅仅是因为本应用与该恶意软件同名。
 
-Bifrost (the malware) only affects Windows systems and has limited functionality after Windows XP. For more information, see [this Wikipedia article](https://en.wikipedia.org/wiki/Bifrost_(Trojan_horse)).
+Bifrost（恶意软件）只影响 Windows 系统，在 Windows XP 之后功能有限。更多信息请参见[这篇维基百科文章](https://en.wikipedia.org/wiki/Bifrost_(Trojan_horse))。
 
-Bifrost (this app) does not contain malware. You can verify this by browsing through the source code or by compiling it yourself using the instructions below.
+Bifrost（本应用）不包含恶意软件。你可以通过浏览源代码或使用下方说明自行编译来验证这一点。
 
+# 构建
+构建本项目应该相当简单。
 
-## Bifrost freezes or becomes unresponsive when clicking Download or Check for Updates.
-This was caused by a coroutine deadlock in the download client, which has been fixed in recent versions. If you're still experiencing freezes, make sure you're running the latest version of Bifrost.
+## 准备：
+1. 确保已安装最新的 [Android Studio Canary](https://developer.android.com/studio/preview)。
+2. 将本项目克隆到 Android Studio 中并让其导入。
 
-## How do I view debug logs?
-Bifrost logs debug information to ~/bifrost_debug.log on desktop platforms. You can enable more verbose logging by setting the SLF4J log level in the application settings or by launching with the appropriate JVM arguments.
-
-## What does "Chunks: X/Y" mean in the download progress?
-During firmware downloads, large files are split into smaller chunks that are downloaded in parallel for faster speeds. "Chunks: X/Y" shows how many of the total chunks have been successfully downloaded. For example, "Chunks: 3/5" means 3 out of 5 chunks are complete.
-
-## Can I pause and resume downloads?
-Yes! Starting from the latest version, you can pause a download at any time by clicking the pause button (⏸) in the download interface. To resume, click the resume button (▶). You can also pause/resume from the command line.
-
-## What happens if my download is interrupted?
-Bifrost supports resumable downloads. If a download is interrupted (due to network issues, app closure, etc.), you can resume it from where it left off. On startup, Bifrost will detect any incomplete downloads and offer to resume them.
-
-## Why is my antivirus flagging the app?
-# Building
-Building this project should be fairly easy.
-
-## Prep:
-1. Make sure you have the latest [Android Studio Canary](https://developer.android.com/studio/preview) installed.
-2. Clone this project into Android Studio and let it import.
-
-## Desktop
+## 桌面端
 
 ### Conveyor
-Bifrost makes use of [Conveyor](https://www.hydraulic.dev/) to create binaries for different desktop platforms.
+Bifrost 使用 [Conveyor](https://www.hydraulic.dev/) 为不同桌面平台创建二进制文件。
 
-Conveyor can build for Windows and Linux from any host OS, but macOS is required to build for macOS.
+Conveyor 可以从任何主机操作系统构建 Windows 和 Linux 版本，但构建 macOS 版本需要 macOS。
 
-1. To build, first download and install Conveyor from the link above.
-2. Next, open a terminal to the project's root directory.
-3. Run `./gradlew :desktop:build` (`.\gradlew.bat :desktop:build` on Windows).
-4. Run the following command based on your target system.  
-   4.1. Intel/AMD (x86) Windows: `conveyor -Kapp.machines=windows.amd64 make windows-zip`.  
-   4.2. ARM64 Windows: `conveyor -Kapp.machines=windows.arm64 make windows-zip`.  
-   4.3. x86 Debian: `conveyor -Kapp.machines=linux.amd64 make debian-package`.  
-   4.4. ARM64 Debian: `conveyor -Kapp.machines=linux.arm64 make debian-package`.  
-   4.5. x86 Linux: `conveyor -Kapp.machines=linux.amd64 make linux-tarball`.  
-   4.6. ARM64 Linux: `conveyor -Kapp.machines=linux.arm64 make linux-tarball`.  
-   4.7. Intel Macs: `conveyor -Kapp.machines=mac.amd64 make unnotarized-mac-zip`.  
-   4.8. Apple Silicon Macs: `conveyor -Kapp.machines=mac.arm64 make unnotarized-mac-zip`.
-5. Check the `output` folder in the root of the project for the binary.
+1. 要构建，首先从上方链接下载并安装 Conveyor。
+2. 接下来，打开终端并进入项目根目录。
+3. 运行 `./gradlew :desktop:build`（Windows 上为 `.\gradlew.bat :desktop:build`）。
+4. 根据你的目标系统运行以下命令。
+   4.1. Intel/AMD（x86）Windows：`conveyor -Kapp.machines=windows.amd64 make windows-zip`。
+   4.2. ARM64 Windows：`conveyor -Kapp.machines=windows.arm64 make windows-zip`。
+   4.3. x86 Debian：`conveyor -Kapp.machines=linux.amd64 make debian-package`。
+   4.4. ARM64 Debian：`conveyor -Kapp.machines=linux.arm64 make debian-package`。
+   4.5. x86 Linux：`conveyor -Kapp.machines=linux.amd64 make linux-tarball`。
+   4.6. ARM64 Linux：`conveyor -Kapp.machines=linux.arm64 make linux-tarball`。
+   4.7. Intel Mac：`conveyor -Kapp.machines=mac.amd64 make unnotarized-mac-zip`。
+   4.8. Apple Silicon Mac：`conveyor -Kapp.machines=mac.arm64 make unnotarized-mac-zip`。
+5. 在项目根目录的 `output` 文件夹中查看生成的二进制文件。
 
 ### Gradle
-Alternatively, you can run a debug binary by executing the `:desktop:run` task.
+或者，你可以通过执行 `:desktop:run` 任务来运行调试版二进制文件。
 
-`./gradlew :desktop:run` (`.\gradlew :desktop:run` on Windows).
+`./gradlew :desktop:run`（Windows 上为 `.\gradlew :desktop:run`）。
 
-## Android:
+## Android：
 
-### Command Line:
-1. Open the Terminal view in Android Studio (bottom-left).
-2. Enter `gradlew :android:build` on Windows or `./gradlew :android:build` on macOS and Linux.
-3. Once it finishes building, go to `android/build/outputs/apk/debug` and install `android-debug.apk`.
+### 命令行：
+1. 在 Android Studio 中打开 Terminal 视图（左下角）。
+2. 在 Windows 上输入 `gradlew :android:build`，或在 macOS 和 Linux 上输入 `./gradlew :android:build`。
+3. 构建完成后，前往 `android/build/outputs/apk/debug` 并安装 `android-debug.apk`。
 
-### GUI:
-1. Open the Gradle view in Android Studio (top-right).
-2. Expand the project, then expand "android".
-3. Expand "Tasks," then "build," and double-click "build".
-4. Once it finishes building, go to `android/build/outputs/apk/debug` and install `android-debug.apk`.
+### GUI：
+1. 在 Android Studio 中打开 Gradle 视图（右上角）。
+2. 展开项目，然后展开 "android"。
+3. 展开 "Tasks"，再展开 "build"，然后双击 "build"。
+4. 构建完成后，前往 `android/build/outputs/apk/debug` 并安装 `android-debug.apk`。
 
-# Running
+# 运行
 
 ## Android
-Download `bifrost_android_<VERSION>.apk` and install it.
+下载 `bifrost_android_<VERSION>.apk` 并安装。
 
 ## Windows
-- On Intel or AMD devices, download the .zip ending in `windows-amd64`.
-- On ARM64 devices, download the .zip ending in `windows-aarch64`.
+- 在 Intel 或 AMD 设备上，下载以 `windows-amd64` 结尾的 .zip 文件。
+- 在 ARM64 设备上，下载以 `windows-aarch64` 结尾的 .zip 文件。
 
 ## macOS
-- On Intel Macs, download the .zip ending in `mac-amd64`.
-- On Apple Silicon Macs, download the .zip ending in `mac-aarch64`.
+- 在 Intel Mac 上，下载以 `mac-amd64` 结尾的 .zip 文件。
+- 在 Apple Silicon Mac 上，下载以 `mac-aarch64` 结尾的 .zip 文件。
 
 ## Linux
-- On Debian-based systems, download the `.deb` file.
-- On other Linux distros, download the `.tar.gz` file.
+- 在 Debian 系系统上，下载 `.deb` 文件。
+- 在其他 Linux 发行版上，下载 `.tar.gz` 文件。
 
-For Intel or AMD devices, download the `amd64` variant. For ARM64 devices, choose `aarch64` or `arm64`.
+对于 Intel 或 AMD 设备，下载 `amd64` 版本。对于 ARM64 设备，选择 `aarch64` 或 `arm64` 版本。
 
-# Translating
+# 翻译
 
-Bifrost uses Weblate for translations.
+Bifrost 使用 Weblate 进行翻译。
 
-Help translate Bifrost to your language on the [project page](https://hosted.weblate.org/engage/bifrost/)!
+请在[项目页面](https://hosted.weblate.org/engage/bifrost/)帮助将 Bifrost 翻译成你的语言！
 
 <a href="https://hosted.weblate.org/engage/bifrost/">
-<img src="https://hosted.weblate.org/widget/bifrost/strings/multi-auto.svg" alt="Translation status" />
+<img src="https://hosted.weblate.org/widget/bifrost/strings/multi-auto.svg" alt="翻译状态" />
 </a>
 
-# Screenshots
+# 截图
 
-## Desktop:
+## 桌面端：
 
-<img src="/screenshots/DesktopDownload.png" alt="Desktop Downloader" width="400"></img>
-<img src="/screenshots/DesktopDecrypt.png" alt="Desktop Decrypter" width="400"></img>
-<img src="/screenshots/DesktopHistory.png" alt="Desktop History" width="400"></img>
-<img src="/screenshots/DesktopSettings.png" alt="Desktop Settings" width="400"></img>
+<img src="/screenshots/DesktopDownload.png" alt="桌面端下载器" width="400"></img>
+<img src="/screenshots/DesktopDecrypt.png" alt="桌面端解密器" width="400"></img>
+<img src="/screenshots/DesktopHistory.png" alt="桌面端历史记录" width="400"></img>
+<img src="/screenshots/DesktopSettings.png" alt="桌面端设置" width="400"></img>
 
-## Mobile:
-<img src="/screenshots/AndroidDownload.png" alt="Android Downloader" width="400"></img>
-<img src="/screenshots/AndroidDecrypt.png" alt="Android Decrypter" width="400"></img>
-<img src="/screenshots/AndroidHistory.png" alt="Android History" width="400"></img>
-<img src="/screenshots/AndroidSettings.png" alt="Android Settings" width="400"></img>
+## 移动端：
+<img src="/screenshots/AndroidDownload.png" alt="Android 下载器" width="400"></img>
+<img src="/screenshots/AndroidDecrypt.png" alt="Android 解密器" width="400"></img>
+<img src="/screenshots/AndroidHistory.png" alt="Android 历史记录" width="400"></img>
+<img src="/screenshots/AndroidSettings.png" alt="Android 设置" width="400"></img>
 
-# Error Reporting
-Bifrost uses Bugsnag for error reporting.
+# 错误报告
+Bifrost 使用 Bugsnag 进行错误报告。
 
 <a href="https://www.bugsnag.com"><img src="https://assets-global.website-files.com/607f4f6df411bd01527dc7d5/63bc40cd9d502eda8ea74ce7_Bugsnag%20Full%20Color.svg" width="200"></a>

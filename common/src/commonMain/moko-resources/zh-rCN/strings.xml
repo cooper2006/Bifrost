@@ -142,11 +142,6 @@
     <string name="check_for_updates">检查更新</string>
     <string name="check">检查</string>
 
-    <!-- Resume Download Dialog -->
-    <string name="resumeDownloadTitle">恢复下载</string>
-    <string name="resumeDownloadMessage">发现 %1$d 个未完成的下载。是否恢复？</string>
-    <string name="resumeDownloadItem">%1$s (%2$d/%3$d 分块)</string>
-    <string name="resume">恢复</string>
-    <string name="skipAll">全部跳过</string>
-    <string name="noIncompleteDownloads">未找到未完成的下载</string>
+    <string name="downloadMode">下载模式</string>
+    <string name="downloadModeDesc">选择单线程 Ktor 流式下载（默认）或分块并行下载以获得大文件的更高性能。</string>
 </resources>

@@ -108,6 +108,8 @@
     <string name="source">来源：</string>
     <string name="file">文件</string>
     <string name="useMicaEffectDesc">在 Windows 11 及更高版本上，Bifrost 可以将 Windows 云母效果应用于窗口背景，使其看起来更像是原生 Windows 应用程序。</string>
+    <string name="useVibrancyEffect">使用 Vibrancy 效果</string>
+    <string name="useVibrancyEffectDesc">在 macOS 上，Bifrost 可以应用 Apple 的模糊背景效果到窗口，使应用看起来更像原生 macOS 应用。</string>
     <string name="manualWarningDetails2">这个问题</string>
     <string name="done">完成</string>
     <string name="show">显示</string>

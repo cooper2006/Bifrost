@@ -23,14 +23,13 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
-import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
 
 /**
  * 管理与三星服务器的通信。
  */
-object FusClient {
-    enum class Request(val value: String, val cloud: Boolean) {
+object FusClient : IFusClient<FusClient.Request> {
+    enum class Request(val value: String, val cloud: Boolean) : IFusClient.IRequest {
         GENERATE_NONCE("NF_SmartDownloadGenerateNonce.do", false),
         BINARY_INFORM("NF_SmartDownloadBinaryInform.do", false),
         BINARY_INIT("NF_SmartDownloadBinaryInitForMass.do", false),
@@ -47,7 +46,7 @@ object FusClient {
     @Volatile
     private var sessionId: String = ""
 
-    suspend fun getNonce(): String {
+    override suspend fun getNonce(): String {
         if (nonce.isBlank()) {
             generateNonce()
         }
@@ -86,7 +85,7 @@ object FusClient {
         return hasher.hash("$a:FUS:$b".toByteArray()).toHexString()
     }
 
-    private suspend fun getAuthV(includeNonce: Boolean = true, signature: String? = null, cloud: Boolean = false): String {
+    override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
         val hasSignature = !signature.isNullOrBlank()
         val effectiveNonce = when {
             includeNonce && hasSignature -> {
@@ -202,7 +201,7 @@ object FusClient {
     @OptIn(InternalAPI::class)
     suspend fun downloadFile(
         fileName: String,
-        start: Long = 0,
+        start: Long,
         size: Long,
         dest: IPlatformFile,
         onAuthRefresh: (suspend () -> Unit)? = null,
@@ -311,27 +310,5 @@ object FusClient {
                 throw e
             }
         }
-    }
-
-    private fun HttpResponse.is401(body: String): Boolean {
-        if (status.value == 401) {
-            return true
-        }
-
-        try {
-            val xml = Ksoup.parse(body)
-
-            val status = xml.firstElementByTagName("FUSBody")
-                ?.firstElementByTagName("Results")
-                ?.firstElementByTagName("Status")
-                ?.text()
-
-            if (status == "401") {
-                return true
-            }
-        } catch (_: Throwable) {
-        }
-
-        return false
     }
 }

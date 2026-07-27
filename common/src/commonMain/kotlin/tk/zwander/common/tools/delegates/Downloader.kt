@@ -7,6 +7,8 @@ import kotlinx.coroutines.withContext
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.FusClient
+import tk.zwander.common.tools.FusClientLegacy
+import tk.zwander.common.tools.IFusClient
 import tk.zwander.common.tools.Request
 import tk.zwander.common.tools.VersionFetch
 import tk.zwander.common.util.BifrostSettings
@@ -54,11 +56,15 @@ object Downloader {
                         message = exception.message!!,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(info!!, model)
+                                performDownload(
+                                    info = info!!,
+                                    model = model,
+                                    legacy = legacy,
+                                    onFinish = onFinish,
+                                )
                             },
                             onCancel = {
-                                model.endJob("")
-                                eventManager.sendEvent(Event.Download.Finish)
+                                onFinish(false, "")
                             },
                         )
                     ),
@@ -72,7 +78,8 @@ object Downloader {
             shouldReportError = {
                 !model.manual.value
             },
-            imeiSerial = "",
+            imeiSerial = model.imeiSerial.value,
+            legacy = legacy,
         )
 
         if (info != null) {

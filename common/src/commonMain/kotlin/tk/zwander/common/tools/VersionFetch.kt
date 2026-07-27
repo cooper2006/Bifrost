@@ -123,12 +123,12 @@ object VersionFetch {
             SmartBinaryInfo(
                 index = info.firstDataElementDataByTagName("BINARY_INDEX")?.toIntOrNull(),
                 sequence = info.firstDataElementDataByTagName("BINARY_SEQUENCE")?.toInt()!!,
-                modelName = info.firstDataElementDataByTagName("BINARY_MODEL_NAME")!!,
+                modelName = info.firstDataElementDataByTagName("BINARY_MODEL_NAME") ?: "",
                 displayName = info.firstDataElementDataByTagName("BINARY_MODEL_DISPLAYNAME"),
-                swVersion = info.firstDataElementDataByTagName("BINARY_SW_VERSION")!!,
+                swVersion = info.firstDataElementDataByTagName("BINARY_SW_VERSION") ?: "",
                 displayVersion = info.firstDataElementDataByTagName("BINARY_SW_DISPLAYVERSION"),
                 directVersion = info.firstDataElementDataByTagName("BINARY_DIRECT_VERSION"),
-                localCode = info.firstDataElementDataByTagName("BINARY_LOCAL_CODE")!!,
+                localCode = info.firstDataElementDataByTagName("BINARY_LOCAL_CODE") ?: "",
                 buyerCode = info.firstDataElementDataByTagName("BINARY_BUYER_CODE"),
                 nature = info.firstDataElementDataByTagName("BINARY_NATURE")?.toIntOrNull(),
                 status = info.firstDataElementDataByTagName("BINARY_STATUS")?.toIntOrNull(),
@@ -152,7 +152,7 @@ object VersionFetch {
     ): Document {
         val requestContent = createHistoryRequest(model, region)
 
-        val response = FusClient.makeReq(
+        val response = IFusClient.selectClientAndMakeRequest(
             request = FusClient.Request.HISTORY,
             data = requestContent,
             signature = model,

@@ -23,6 +23,7 @@ import tk.zwander.common.util.invoke
 import tk.zwander.common.util.isAccessoryModel
 import tk.zwander.common.util.textNode
 import tk.zwander.samloaderkotlin.resources.MR
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.ExperimentalTime
 
 /**
@@ -52,6 +53,8 @@ object Request {
         model: String,
         region: String,
         imeiSerial: String,
+        includeNonce: Boolean,
+        legacy: Boolean = false,
     ): Pair<String, Document> {
         println("[BifrostDownload] BinaryInform start: fw=$fw, model=$model, region=$region, imeiSerialCount=${imeiSerial.split("\n").flatMap { it.split(";") }.size}")
         val splitImeiSerial = imeiSerial.split("\n").flatMap { it.split(";") }
@@ -61,15 +64,26 @@ object Request {
         var latestError: Throwable? = null
 
         splitImeiSerial.forEachIndexed { index, imei ->
-            latestRequest = createBinaryInform(fw, model, region, FusClient.getNonce())
+            latestRequest = createBinaryInform(
+                fw = fw,
+                model = model,
+                region = region,
+                nonce = IFusClient.getNonce(legacy),
+                legacy = legacy,
+                imeiSerial = imei,
+            )
 
             if (index % 10 == 0) {
-                delay(1000)
+                delay(1000.milliseconds)
             }
 
             latestResult = try {
                 val response =
-                    FusClient.makeReq(FusClient.Request.BINARY_INFORM, latestRequest)
+                    IFusClient.performBinaryInform(
+                        data = latestRequest,
+                        includeNonce = includeNonce,
+                        legacy = legacy,
+                    )
 
                 Ksoup.parse(response)
             } catch (e: Throwable) {
@@ -110,7 +124,9 @@ object Request {
         fw: String,
         model: String,
         region: String,
-        nonce: String
+        nonce: String,
+        imeiSerial: String,
+        legacy: Boolean,
     ): String {
         val logicCheck = try {
             getLogicCheck(fw, nonce)
@@ -118,24 +134,42 @@ object Request {
             e.printStackTrace()
             ""
         }
+        val split = fw.split("/")
+        val (pda, csc, phone, data) = Array(4) { split.getOrNull(it) }
 
         val xml = xml("FUSMsg") {
             "FUSHdr" {
-                textNode("ProtoVer", "1")
+                textNode("ProtoVer", if (legacy) "1.0" else "1")
                 textNode("SessionID", "0")
                 textNode("MsgID", "1")
             }
             "FUSBody" {
                 "Put" {
-                    textNode("CmdID", "1")
-                    dataNode("ACCESS_MODE", "1")
+                    if (!legacy) {
+                        textNode("CmdID", "1")
+                        dataNode("REQUEST_TYPE", "2")
+                        dataNode("BINARY_SW_VERSION", fw)
+                        dataNode("DEVICE_SN_NUMBER", "")
+                        dataNode("BINARY_LOCAL_CODE", region)
+                        dataNode("BINARY_MODEL_NAME", model)
+                    } else {
+                        dataNode("CLIENT_PRODUCT", "Smart Switch")
+                        dataNode("CLIENT_VERSION", "4.3.23123_1")
+                        dataNode("DEVICE_IMEI_PUSH", imeiSerial.trim())
+
+                        dataNode("DEVICE_FW_VERSION", fw.trim())
+                        dataNode("DEVICE_LOCAL_CODE", region.trim())
+                        dataNode("DEVICE_AID_CODE", region.trim())
+                        dataNode("DEVICE_MODEL_NAME", model.trim())
+
+                        dataNode("DEVICE_CONTENTS_DATA_VERSION", data?.trim() ?: "")
+                        dataNode("DEVICE_CSC_CODE2_VERSION", csc?.trim() ?: "")
+                        dataNode("DEVICE_PDA_CODE1_VERSION", pda?.trim() ?: "")
+                        dataNode("DEVICE_PHONE_FONT_VERSION", phone?.trim() ?: "")
+                    }
+                    dataNode("ACCESS_MODE", if (legacy) "2" else "1")
                     dataNode("BINARY_NATURE", "1")
-                    dataNode("REQUEST_TYPE", "2")
                     dataNode("LOGIC_CHECK", logicCheck.trim())
-                    dataNode("BINARY_SW_VERSION", fw)
-                    dataNode("DEVICE_SN_NUMBER", "")
-                    dataNode("BINARY_LOCAL_CODE", region)
-                    dataNode("BINARY_MODEL_NAME", model)
 
                     "CLIENT_LANGUAGE" {
                         textNode("Type", "String")
@@ -158,7 +192,11 @@ object Request {
 
                 "Get" {
                     textNode("CmdID", "2")
-                    "BINARY_SW_VERSION"()
+                    if (legacy) {
+                        "LATEST_FW_VERSION"()
+                    } else {
+                        "BINARY_SW_VERSION"()
+                    }
                 }
             }
         }
@@ -175,9 +213,10 @@ object Request {
     fun createBinaryInit(
         fileName: String,
         nonce: String,
-        fw: String,
-        modelType: String,
+        fw: String?,
+        modelType: String?,
         region: String,
+        legacy: Boolean,
     ): String {
         val logicCheck = run {
             val special = fileName.slice(fileName.length - 25 until fileName.length - 9)
@@ -192,10 +231,12 @@ object Request {
             }
             "FUSBody" {
                 "Put" {
-                    dataNode("BINARY_NAME", fileName)
-                    dataNode("BINARY_SW_VERSION", fw)
-                    dataNode("DEVICE_LOCAL_CODE", region)
-                    dataNode("DEVICE_MODEL_TYPE", modelType)
+                    dataNode(if (legacy) "BINARY_FILE_NAME" else "BINARY_NAME", fileName)
+                    if (!legacy) {
+                        fw?.let { dataNode("BINARY_SW_VERSION", it) }
+                        dataNode("DEVICE_LOCAL_CODE", region)
+                        modelType?.let { dataNode("DEVICE_MODEL_TYPE", it) }
+                    }
                     dataNode("LOGIC_CHECK", logicCheck)
                 }
             }
@@ -209,13 +250,14 @@ object Request {
         model: String,
         region: String,
         imeiSerial: String,
-        onFinish: suspend (String) -> Unit,
+        legacy: Boolean,
+        onErrorFinish: suspend (String) -> Unit,
         onVersionException: (suspend (VersionException, BinaryFileInfo?) -> Unit)? = null,
         shouldReportError: suspend (Exception) -> Boolean = { true },
     ): BinaryFileInfo? {
         println("[BifrostDownload] retrieveBinaryFileInfo: fw=$fw, model=$model, region=$region")
         val result = getBinaryFile(
-            fw, model, region, imeiSerial,
+            fw = fw, model = model, region = region, imeiSerial = imeiSerial, legacy = legacy,
         )
 
         val (info, error, output, requestBody) = result
@@ -254,10 +296,18 @@ object Request {
         model: String,
         region: String,
         imeiSerial: String,
+        legacy: Boolean,
     ): FetchResult.GetBinaryFileResult {
         println("[BifrostDownload] getBinaryFile: calling performBinaryInformRetry...")
         val (request, responseXml) = try {
-            performBinaryInformRetry(fw.uppercase(), model, region, imeiSerial)
+            performBinaryInformRetry(
+                fw = fw.uppercase(),
+                model = model,
+                region = region,
+                imeiSerial = imeiSerial,
+                includeNonce = false,
+                legacy = legacy,
+            )
         } catch (e: Exception) {
             println("[BifrostDownload] getBinaryFile: BinaryInform failed: ${e.javaClass.simpleName}: ${e.message}")
             CrossPlatformBugsnag.notify(e)
@@ -368,7 +418,7 @@ object Request {
                 }
             }
 
-            fun generateInfo(): BinaryFileInfo {
+            suspend fun generateInfo(): BinaryFileInfo {
                 val path = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
                     ?.firstDataElementDataByTagName("MODEL_PATH")!!
@@ -380,6 +430,7 @@ object Request {
 
                 val v4Key = try {
                     responseXml.extractV4Key()
+                        ?: CryptUtils.getV4Key(fw, model, region, imeiSerial)
                 } catch (e: Exception) {
                     e.printStackTrace()
                     null
@@ -387,11 +438,11 @@ object Request {
 
                 val fwVer = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
-                    ?.firstDataElementDataByTagName("BINARY_SW_VERSION")!!
+                    ?.firstDataElementDataByTagName("BINARY_SW_VERSION")
 
                 val modelType = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
-                    ?.firstDataElementDataByTagName("DEVICE_MODEL_TYPE")!!
+                    ?.firstDataElementDataByTagName("DEVICE_MODEL_TYPE")
 
                 val logicVal = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")

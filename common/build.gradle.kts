@@ -23,15 +23,15 @@ kotlin.sourceSets.all {
     languageSettings.optIn("kotlin.RequiresOptIn")
 }
 
-val javaVersionEnum: JavaVersion by rootProject.extra
+val javaVersionEnum: JavaVersion = rootProject.extra["javaVersionEnum"] as JavaVersion
 
 kotlin {
     val iosArm64 = iosArm64()
     val iosSimulatorArm64 = iosSimulatorArm64()
 
-    val versionCode: Int by rootProject.extra
-    val versionName: String by rootProject.extra
-    val packageName: String by rootProject.extra
+    val versionCode: Int = rootProject.extra["versionCode"] as Int
+    val versionName: String = rootProject.extra["versionName"] as String
+    val packageName: String = rootProject.extra["packageName"] as String
 
     listOf(iosArm64, iosSimulatorArm64).forEach {
         it.compilations.getByName("main") {
@@ -57,8 +57,8 @@ kotlin {
     android {
         withJava()
 
-        val compileSdk: Int by rootProject.extra
-        val minSdk: Int by rootProject.extra
+        val compileSdk: Int = rootProject.extra["compileSdk"] as Int
+        val minSdk: Int = rootProject.extra["minSdk"] as Int
 
         this.compileSdk = compileSdk
         this.minSdk = minSdk
@@ -72,7 +72,6 @@ kotlin {
         this.enableCoreLibraryDesugaring = true
 
         compilerOptions {
-            val javaVersionEnum: JavaVersion by rootProject.extra
             jvmTarget.set(JvmTarget.fromTarget(javaVersionEnum.toString()))
         }
 
@@ -132,8 +131,9 @@ kotlin {
     }
 
     sourceSets {
-        val commonMain by getting {
+        commonMain {
             dependencies {
+                api(libs.compose.constraintlayout)
                 api(libs.compose.foundation)
                 api(libs.compose.material3)
                 api(libs.compose.runtime)
@@ -173,8 +173,8 @@ kotlin {
             }
         }
 
-        val androidAndJvmMain by creating {
-            dependsOn(commonMain)
+        val androidAndJvmMain = create("androidAndJvmMain") {
+            dependsOn(commonMain.get())
 
             dependencies {
 //                api(libs.ktor.client.okhttp)
@@ -182,11 +182,11 @@ kotlin {
             }
         }
 
-        val skiaMain by creating {
-            dependsOn(commonMain)
+        val skiaMain = create("skiaMain") {
+            dependsOn(commonMain.get())
         }
 
-        val jvmMain by getting {
+        jvmMain {
             dependsOn(androidAndJvmMain)
             dependsOn(skiaMain)
 
@@ -206,7 +206,7 @@ kotlin {
             }
         }
 
-        val androidMain by getting {
+        androidMain {
             dependsOn(androidAndJvmMain)
 
             dependencies {
@@ -222,10 +222,9 @@ kotlin {
             }
         }
 
-        val darwinMain by creating {
+        val darwinMain = create("darwinMain") {
             dependsOn(skiaMain)
             dependencies {
-//                api(libs.ktor.client.darwin)
                 api(libs.nsexceptionKt.core)
                 api(libs.nserrorKt)
                 api(libs.cryptography.provider.openssl3.prebuilt)
@@ -233,16 +232,16 @@ kotlin {
             }
         }
 
-        val iosArm64Main by getting {
+        val iosMain = create("iosMain") {
+            dependsOn(darwinMain)
+        }
+        iosArm64Main {
+            dependsOn(iosMain)
             resources.srcDirs("build/generated/moko/iosArm64Main/src")
         }
-        val iosSimulatorArm64Main by getting {
+        iosSimulatorArm64Main {
+            dependsOn(iosMain)
             resources.srcDirs("build/generated/moko/iosSimulatorArm64Main/src")
-        }
-        val iosMain by creating {
-            dependsOn(darwinMain)
-            iosArm64Main.dependsOn(this)
-            iosSimulatorArm64Main.dependsOn(this)
         }
     }
 }
@@ -280,34 +279,44 @@ dependencies {
 }
 
 afterEvaluate {
-    val versionName: String by rootProject.extra
-    val versionCode: Int by rootProject.extra
+    val versionName: String = rootProject.extra["versionName"] as String
+    val versionCode: Int = rootProject.extra["versionCode"] as Int
 
-    try {
-        providers.exec {
-            commandLine(
-                "plutil",
-                "-replace",
-                "CFBundleShortVersionString",
-                "-string",
-                versionName,
-                "../iosApp/iosApp/Info.plist",
-            )
-        }
-    } catch (_: Throwable) {
+    val setVersionName = providers.exec {
+        isIgnoreExitValue = true
+
+        commandLine(
+            "/usr/bin/plutil",
+            "-replace",
+            "CFBundleShortVersionString",
+            "-string",
+            versionName,
+            "${rootProject.layout.projectDirectory.asFile.absolutePath}/iosApp/iosApp/Info.plist",
+        )
+    }
+
+    val setVersionCode = providers.exec {
+        isIgnoreExitValue = true
+
+        commandLine(
+            "/usr/bin/plutil",
+            "-replace",
+            "CFBundleVersion",
+            "-string",
+            "$versionCode",
+            "${rootProject.layout.projectDirectory.asFile.absolutePath}/iosApp/iosApp/Info.plist",
+        )
     }
 
     try {
-        providers.exec {
-            commandLine(
-                "plutil",
-                "-replace",
-                "CFBundleVersion",
-                "-string",
-                "$versionCode",
-                "../iosApp/iosApp/Info.plist",
-            )
+        setVersionName.result.get()
+        setVersionCode.result.get()
+
+        setVersionName.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+            println(it)
         }
-    } catch (_: Throwable) {
-    }
+        setVersionCode.standardError.asText.get().takeIf { it.isNotBlank() }?.let {
+            println(it)
+        }
+    } catch (_: Throwable) {}
 }

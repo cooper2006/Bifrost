@@ -21,10 +21,6 @@ import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.core.toByteArray
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
 import tk.zwander.common.util.firstElementByTagName
@@ -41,9 +37,14 @@ object FusClient {
         HISTORY("SmartHistory.do", false),
     }
 
+    // @Volatile: 这些字段从协程中访问，可能在不同线程上运行。
+    // @Volatile 确保跨线程可见性，但复合操作（如 check-then-act）仍需调用方保证顺序。
+    @Volatile
     private var nonce = ""
 
+    @Volatile
     private var auth: String = ""
+    @Volatile
     private var sessionId: String = ""
 
     suspend fun getNonce(): String {
@@ -87,7 +88,7 @@ object FusClient {
 
     private suspend fun getAuthV(includeNonce: Boolean = true, signature: String? = null, cloud: Boolean = false): String {
         val hasSignature = !signature.isNullOrBlank()
-        val nonce = when {
+        val effectiveNonce = when {
             includeNonce && hasSignature -> {
                 val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
                 CharArray(16) { chars.random() }.joinToString("")
@@ -95,7 +96,7 @@ object FusClient {
             includeNonce -> nonce
             else -> ""
         }
-        return "FUS nonce=\"${if (cloud) nonce else this.nonce}\", " +
+        return "FUS nonce=\"${if (cloud) effectiveNonce else this.nonce}\", " +
                 "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: this.auth}\", " +
                 "nc=\"${if (hasSignature) "00000001" else ""}\", " +
                 "type=\"${if (hasSignature) "auth" else ""}\", " +
@@ -103,6 +104,8 @@ object FusClient {
     }
 
     private fun getDownloadUrl(path: String): String {
+        // 注意：三星 FUS 下载服务器仅支持 HTTP（不支持 HTTPS）。
+        // Authorization header 中的认证信息将以明文传输，这是协议限制。
         return "http://cloud-neofussvr.samsungmobile.com/NF_SmartDownloadBinaryForMass.do?file=${path}"
     }
 
@@ -112,8 +115,8 @@ object FusClient {
      * @param data 需要放入请求中的任何正文数据。
      * @return 响应正文数据，作为文本。通常是XML。
      */
-    suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
-        println("[BifrostDownload] makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}")
+    suspend fun makeReq(request: Request, data: String = "", signature: String? = null, retryCount: Int = 0): String {
+        println("[BifrostDownload] makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}, retry=$retryCount")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
             println("[BifrostDownload] makeReq: nonce blank, generating...")
             generateNonce()
@@ -140,10 +143,14 @@ object FusClient {
         println("[BifrostDownload] makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
-            println("[BifrostDownload] makeReq: got 401, regenerating nonce and retrying")
+            if (retryCount >= 3) {
+                println("[BifrostDownload] makeReq: 401 after $retryCount retries, giving up")
+                throw RuntimeException("认证持续失败（重试 $retryCount 次后仍为 401）")
+            }
+            println("[BifrostDownload] makeReq: got 401, regenerating nonce and retrying (${retryCount + 1}/3)")
             generateNonce()
 
-            return makeReq(request, data)
+            return makeReq(request, data, signature, retryCount + 1)
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {
@@ -151,7 +158,7 @@ object FusClient {
                 nonce = response.headers["NONCE"] ?: response.headers["nonce"] ?: ""
 
                 try {
-                    auth = CryptUtils.decryptNonce(nonce.take(16).padEnd((16 - nonce.length).coerceAtLeast(0), '0'))
+                    auth = CryptUtils.decryptNonce(nonce.take(16).padEnd(16, '0'))
                 } catch (_: Exception) {}
             } catch (e: ArrayIndexOutOfBoundsException) {
                 BugsnagUtils.addBreadcrumb(
@@ -208,90 +215,101 @@ object FusClient {
         // 单线程 Ktor 流式下载，不经过 Ketch（Ketch 内部会先发 HEAD 消耗 auth）
         println("[BifrostDownload] downloadFile: using Ktor single-thread streaming mode, size=${size / (1024 * 1024)}MB")
 
-        val authV = getAuthV(cloud = true)
-        val destPath = dest.getAbsolutePath()
+        val maxAuthRetries = 3
+        var authRetries = 0
+        var downloadedBytes = start
         val buffer = ByteArray(64 * 1024) // 64KB buffer
         val startTime = System.currentTimeMillis()
-        var downloadedBytes = start
 
-        try {
-            globalHttpClient.prepareRequest {
-                method = HttpMethod.Get
-                url(url)
-                headers {
-                    append("Authorization", authV)
-                    append("User-Agent", "SMART 2.0")
-                    append("Cache-Control", "no-cache")
-                    if (start > 0) {
-                        append("Range", "bytes=$start-")
-                    }
-                }
-                timeout {
-                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                    socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
-                    connectTimeoutMillis = 30_000L
-                }
-            }.execute { response ->
-                println("[BifrostDownload] downloadFile: GET response status=${response.status.value}")
+        while (true) {
+            val authV = getAuthV(cloud = true)
 
-                if (response.status.value == 401) {
-                    throw RuntimeException("HTTP 401: Unauthorized")
-                }
-                if (response.status.value != 200 && response.status.value != 206) {
-                    throw RuntimeException("下载失败，状态码: ${response.status.value}")
-                }
-
-                val channel = response.bodyAsChannel()
-                val outputStream = dest.openOutputStream(true)!!
-
-                try {
-                    var lastProgressTime = startTime
-                    var lastLogTime = startTime
-
-                    while (!channel.isClosedForRead) {
-                        val bytesRead = channel.readAvailable(buffer)
-                        if (bytesRead <= 0) break
-
-                        outputStream.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-
-                        val now = System.currentTimeMillis()
-                        val elapsed = (now - startTime) / 1000.0
-                        val bps = if (elapsed > 0) (downloadedBytes / elapsed).toLong() else 0L
-
-                        // 进度回调节流，每 500ms 触发一次
-                        if (now - lastProgressTime > 500) {
-                            progressCallback(downloadedBytes, size, bps)
-                            lastProgressTime = now
-                        }
-
-                        // 每 5 秒打印一次下载进度日志
-                        if (now - lastLogTime > 5000) {
-                            val pct = if (size > 0) String.format("%.1f", downloadedBytes * 100.0 / size) else "0"
-                            println("[BifrostDownload] progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
-                            lastLogTime = now
+            try {
+                globalHttpClient.prepareRequest {
+                    method = HttpMethod.Get
+                    url(url)
+                    headers {
+                        append("Authorization", authV)
+                        append("User-Agent", "SMART 2.0")
+                        append("Cache-Control", "no-cache")
+                        if (downloadedBytes > 0) {
+                            append("Range", "bytes=$downloadedBytes-")
                         }
                     }
-                } finally {
-                    outputStream.flush()
-                    outputStream.close()
+                    timeout {
+                        requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                        socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
+                        connectTimeoutMillis = 30_000L
+                    }
+                }.execute { response ->
+                    println("[BifrostDownload] downloadFile: GET response status=${response.status.value}")
+
+                    if (response.status.value == 401) {
+                        throw RuntimeException("HTTP 401: Unauthorized")
+                    }
+                    if (response.status.value != 200 && response.status.value != 206) {
+                        throw RuntimeException("下载失败，状态码: ${response.status.value}")
+                    }
+
+                    val channel = response.bodyAsChannel()
+                    val outputStream = dest.openOutputStream(true)!!
+
+                    try {
+                        var lastProgressTime = startTime
+                        var lastLogTime = startTime
+
+                        while (!channel.isClosedForRead) {
+                            val bytesRead = channel.readAvailable(buffer)
+                            if (bytesRead <= 0) break
+
+                            outputStream.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+
+                            val now = System.currentTimeMillis()
+                            val elapsed = (now - startTime) / 1000.0
+                            val bps = if (elapsed > 0) (downloadedBytes / elapsed).toLong() else 0L
+
+                            // 进度回调节流，每 500ms 触发一次
+                            if (now - lastProgressTime > 500) {
+                                progressCallback(downloadedBytes, size, bps)
+                                lastProgressTime = now
+                            }
+
+                            // 每 5 秒打印一次下载进度日志
+                            if (now - lastLogTime > 5000) {
+                                val pct = if (size > 0) String.format("%.1f", downloadedBytes * 100.0 / size) else "0"
+                                println("[BifrostDownload] progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
+                                lastLogTime = now
+                            }
+                        }
+                    } finally {
+                        outputStream.flush()
+                        outputStream.close()
+                    }
+
+                    // 最终进度回调
+                    val elapsedTotal = (System.currentTimeMillis() - startTime) / 1000.0
+                    val bps = if (elapsedTotal > 0) (downloadedBytes / elapsedTotal).toLong() else 0L
+                    progressCallback(downloadedBytes, size, bps)
+
+                    println("[BifrostDownload] downloadFile: done: ${downloadedBytes / (1024 * 1024)}MB in ${String.format("%.1f", elapsedTotal)}s, bps=${bps / 1024}KB/s")
                 }
 
-                // 最终进度回调
-                val elapsedTotal = (System.currentTimeMillis() - startTime) / 1000.0
-                val bps = if (elapsedTotal > 0) (downloadedBytes / elapsedTotal).toLong() else 0L
-                progressCallback(downloadedBytes, size, bps)
-
-                println("[BifrostDownload] downloadFile: done: ${downloadedBytes / (1024 * 1024)}MB in ${String.format("%.1f", elapsedTotal)}s, bps=${bps / 1024}KB/s")
+                return null
+            } catch (e: CancellationException) {
+                println("[BifrostDownload] downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
+                throw e
+            } catch (e: Exception) {
+                val isAuth = e.message?.contains("401") == true
+                if (isAuth && onAuthRefresh != null && authRetries < maxAuthRetries) {
+                    authRetries++
+                    println("[BifrostDownload] downloadFile: 401 during download, calling onAuthRefresh ($authRetries/$maxAuthRetries)")
+                    onAuthRefresh.invoke()
+                    continue
+                }
+                println("[BifrostDownload] downloadFile: failed: ${e.javaClass.simpleName}: ${e.message}")
+                throw e
             }
-
-            return null
-        } catch (e: CancellationException) {
-            println("[BifrostDownload] downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
-            throw e
-        } catch (e: Exception) {
-            println("[BifrostDownload] downloadFile: failed: ${e.javaClass.simpleName}: ${e.message}")
-            throw e
         }
     }
 

@@ -34,7 +34,11 @@ import java.nio.channels.FileChannel
  *
  * 支持 401 自动重试：当 nonce 过期导致分块返回 401 时，
  * 通过 authProvider 刷新授权并重试该分块。
+ *
+ * @deprecated 多线程下载速度不稳定，已改用 FusClient.downloadFile 单线程流式下载。
+ *             保留此代码以备未来可能的性能优化使用。
  */
+@Deprecated("多线程下载速度不稳定，已改用单线程流式下载。保留以备未来使用。", level = DeprecationLevel.WARNING)
 object ParallelDownloader {
 
     private const val MIN_CHUNK_SIZE = 50L * 1024 * 1024  // 50MB

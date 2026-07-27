@@ -259,7 +259,16 @@ while (initRetries <= maxInitRetries) {
                 start = encFile.getLength(),   // 从当前偏移继续
                 size = size,
                 dest = encFile,
-                onAuthRefresh = { /* 401 时重新发 BinaryInit */ },
+                onAuthRefresh = {
+                    // 401 时先刷新 nonce，再重新发送 BinaryInit
+                    // 确保下载会话使用最新的认证凭证
+                    FusClient.refreshNonce()
+                    val initRequest = Request.createBinaryInit(
+                        fileName, FusClient.getNonce(),
+                        fwVer, modelType, model.region.value,
+                    )
+                    FusClient.makeReq(FusClient.Request.BINARY_INIT, initRequest)
+                },
             ) { current, max, bps -> /* 进度回调 */ }
         } else {
             null  // 文件已完整，跳过下载
@@ -375,20 +384,33 @@ model.addTempFile(decFile)          // 解密后的固件
 model.addTempFile(decKeyFile)       // 解密密钥
 ```
 
-`onEnd()` 被调用时执行 `cleanupTempFiles()`（[DownloadModel.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/model/DownloadModel.kt#L70)）。当前实现（v2.3.0+）按结果分支处理：
+`onEnd()` 被调用时按结果分支处理（[DownloadModel.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/model/DownloadModel.kt#L70)）：
 
 ```kotlin
 override fun onEnd(text: String) {
     super.onEnd(text)
     // 仅在成功或用户取消时清理；失败时保留已下载部分以便下次续传
-    val isSuccess = text.isBlank() || text == "done"
-    if (isSuccess) {
+    val shouldCleanup = _jobSuccess || text.isBlank()
+    if (shouldCleanup) {
         cleanupTempFiles()
     }
+    _jobSuccess = false
 }
 ```
 
-> **变更说明（v2.3.0+）：** 此前 `onEnd()` 在所有路径（含失败）上都执行 cleanup，会删除已下载的加密文件，使断点续传失效。现已修正为**仅成功/取消时清理，失败时保留**，配合 `start = encFile.getLength()` 实现失败后重试的续传。
+成功完成时，下载流程调用 `endJobSuccess(text)` 而非 `endJob(text)`：
+
+```kotlin
+fun endJobSuccess(text: String) {
+    _jobSuccess = true
+    endJob(text)
+}
+```
+
+> **变更说明（v2.3.0+）：** 此前 `onEnd()` 通过 `text == "done"` 硬编码字符串判断成功，不可靠（本地化后字符串可能不同），且在所有路径（含失败）上都可能执行 cleanup，删除已下载的加密文件导致断点续传失效。现已修正为：
+> - **成功时**调用 `endJobSuccess()` 设置 `_jobSuccess = true`，触发 cleanup
+> - **取消时**`text.isBlank()` 为真，触发 cleanup
+> - **失败时**两者皆为 false，保留已下载部分，配合 `start = encFile.getLength()` 实现续传
 
 ### 4.5 暂停 / 恢复机制
 
@@ -672,7 +694,8 @@ sequenceDiagram
         DL->>DL: 复制文件 临时 → 目标
     end
     DL->>DL: AES-ECB 解密 (.enc2/.enc4)
-    DL->>DM: onEnd() → 仅成功/取消时 cleanupTempFiles()
+    DL->>DM: endJobSuccess() → 设置 success 标志并触发 onEnd()
+    DM->>DM: onEnd() → success=true 时 cleanupTempFiles()
     DL-->>UI: 完成 / 错误信息
     UI-->>User: 显示结果
 ```

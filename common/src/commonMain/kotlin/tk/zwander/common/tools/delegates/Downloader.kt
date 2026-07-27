@@ -7,7 +7,6 @@ import kotlinx.coroutines.withContext
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.FusClient
-import tk.zwander.common.tools.ParallelDownloader
 import tk.zwander.common.tools.Request
 import tk.zwander.common.tools.VersionFetch
 import tk.zwander.common.util.BifrostSettings
@@ -191,75 +190,45 @@ object Downloader {
                 println("[BifrostDownload] performDownload: BinaryInit response received")
 
                 try {
-                    val existingLen = extractedEncFile.getLength()
+                    val existingLen = encFile.getLength()
                     println("[BifrostDownload] performDownload: existing enc len=$existingLen, target size=$size, willDownload=${existingLen < size}")
                     md5 = if (existingLen < size) {
-                        if (BifrostSettings.Keys.downloadMode()) {
-                            // Parallel chunked download mode
-                            val authProvider: () -> String = {
-                                FusClient.getAuthV(cloud = true)
-                            }
-                            ParallelDownloader.downloadFile(
-                                fileName = path + fileName,
-                                start = encFile.getLength(),
-                                size = size,
-                                dest = encFile,
-                                progressCallback = { current, max, bps ->
-                                    // Check for pause
-                                    while (model.isPaused.value) {
-                                        kotlinx.coroutines.delay(100)
-                                    }
-
-                                    model.progress.value = current to max
-                                    model.speed.value = bps
-
-                                    eventManager.sendEvent(
-                                        Event.Download.Progress(
-                                            status = MR.strings.downloading(),
-                                            current = current,
-                                            max = max,
-                                        )
-                                    )
-                                },
-                                authProvider = authProvider,
-                            )
-                        } else {
-                            // Single-thread Ktor streaming mode (default)
-                            FusClient.downloadFile(
-                                fileName = path + fileName,
-                                start = encFile.getLength(),
-                                size = size,
-                                dest = encFile,
-                                onAuthRefresh = {
-                                    println("[BifrostDownload] performDownload: onAuthRefresh, re-sending BinaryInit")
-                                    val initRequest = Request.createBinaryInit(
-                                        fileName,
-                                        FusClient.getNonce(),
-                                        fwVer,
-                                        modelType,
-                                        model.region.value,
-                                    )
-                                    FusClient.makeReq(FusClient.Request.BINARY_INIT, initRequest)
-                                },
-                                progressCallback = { current, max, bps ->
-                                    // Check for pause
-                                    while (model.isPaused.value) {
-                                        kotlinx.coroutines.delay(100)
-                                    }
-
-                                    model.progress.value = current to max
-                                    model.speed.value = bps
-
-                                    eventManager.sendEvent(
-                                        Event.Download.Progress(
-                                            status = MR.strings.downloading(),
-                                            current = current,
-                                            max = max,
-                                        )
-                                    )
+                        // Single-thread Ktor streaming mode (always used; parallel mode is disabled)
+                        FusClient.downloadFile(
+                            fileName = path + fileName,
+                            start = encFile.getLength(),
+                            size = size,
+                            dest = encFile,
+                            onAuthRefresh = {
+                                println("[BifrostDownload] performDownload: onAuthRefresh, refreshing nonce then re-sending BinaryInit")
+                                FusClient.refreshNonce()
+                                val initRequest = Request.createBinaryInit(
+                                    fileName,
+                                    FusClient.getNonce(),
+                                    fwVer,
+                                    modelType,
+                                    model.region.value,
+                                )
+                                FusClient.makeReq(FusClient.Request.BINARY_INIT, initRequest)
+                            },
+                            progressCallback = { current, max, bps ->
+                                // Check for pause
+                                while (model.isPaused.value) {
+                                    kotlinx.coroutines.delay(100)
                                 }
-                            )
-                        }
+
+                                model.progress.value = current to max
+                                model.speed.value = bps
+
+                                eventManager.sendEvent(
+                                    Event.Download.Progress(
+                                        status = MR.strings.downloading(),
+                                        current = current,
+                                        max = max,
+                                    )
+                                )
+                            }
+                        )
                     } else {
                         println("[BifrostDownload] performDownload: file already complete, skipping download")
                         null
@@ -274,9 +243,8 @@ object Downloader {
                         e.message?.contains("timeout") == true ||
                         e.message?.contains("SocketTimeout") == true
                     val isConnectionClosed = e.javaClass.simpleName.contains("ClosedByteChannel") ||
-                        e.message?.contains("closed") == true ||
-                        e.message?.contains("Closed") == true ||
-                        e is java.io.IOException
+                        e.message?.contains("closed", ignoreCase = true) == true ||
+                        (e is java.io.IOException && e !is java.nio.file.FileSystemException)
                     println("[BifrostDownload] performDownload: download error: ${e.javaClass.simpleName}: ${e.message}, isAuth=$isAuth, isTimeout=$isTimeout, isConnectionClosed=$isConnectionClosed")
                     if ((isAuth || isTimeout || isConnectionClosed) && initRetries < maxInitRetries) {
                         initRetries++
@@ -457,7 +425,7 @@ object Downloader {
             }
 
             println("[BifrostDownload] performDownload: DONE")
-            model.endJob(MR.strings.done())
+        model.endJobSuccess(MR.strings.done())
         } catch (e: Throwable) {
             println("[BifrostDownload] performDownload: FAILED: ${e.javaClass.simpleName}: ${e.message}")
             val message = if (e !is CancellationException) "${e.message}" else ""

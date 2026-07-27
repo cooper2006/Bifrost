@@ -7,6 +7,8 @@
 - **HTTP Range 断点续传**：失败/中断的下载现在通过 `Range: bytes={start}-` 从当前文件偏移继续，而非从头开始
 - **Socket 超时处理**：下载在 60 秒 socket 空闲后中止并自动重试/续传（此前在连接静默断开时会无限阻塞）
 - `ParallelDownloader`：分块并行下载引擎，使用 `FileChannel` positioned write 和分块级 401 重试（已实现，尚未接入主流程）
+- `FusClient.downloadFile()` 新增 `onAuthRefresh` 参数：下载过程中返回 401 时调用回调以重新建立下载会话（先刷新 nonce，再发送 BinaryInit）
+- `DownloadModel.endJobSuccess()` 方法：显式标记任务成功完成，解决此前通过 `text == "done"` 硬编码字符串判断成功的不可靠问题
 
 ### Changed
 - **用 Ktor 流式下载替换 Ketch**：`FusClient.downloadFile()` 现直接使用 Ktor HTTP 客户端；移除 Ketch，因为它在下载前会发 HEAD 请求，消耗 FUS auth 并导致后续请求失败
@@ -14,11 +16,17 @@
 - **临时文件清理策略**：`DownloadModel.onEnd()` 现仅在成功或用户取消时清理临时文件；失败时保留已下载部分，以便下次尝试续传
 - 重构 `Downloader.performDownload()` — 将文件路径解析移出 try 块，减少嵌套
 - 在整个下载路径中添加 `[BifrostDownload]` 前缀的诊断日志
+- Gradle wrapper 版本升级到 9.6.1（与本地安装版本一致）
 
 ### Fixed
 - 从 `common/build.gradle.kts` 和 `desktop/build.gradle.kts` 移除未使用的 `jvmToolchain`
 - 将 `java.sql` 模块加入桌面端 JVM 模块列表（SQLite 所需）
 - 从下载请求头中移除 auth token 的调试 `println`
+- `FusClient.nonce` / `auth` / `sessionId` 字段添加 `@Volatile` 注解，确保协程跨线程可见性
+- `desktop/build.gradle.kts` Skiko 路径检测改为跨平台（支持 macOS / Linux / Windows）
+- `ParallelDownloader` 添加 `@Deprecated` 标注（多线程下载速度不稳定，已改用单线程流式下载）
+- `getAuthV()` 修复变量遮蔽问题（本地 nonce 重命名为 `effectiveNonce`）
+- 连接断开异常检查排除 `FileSystemException`，避免将文件系统权限错误误判为可恢复的网络错误
 
 ---
 

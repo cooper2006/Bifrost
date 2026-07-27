@@ -9,6 +9,8 @@
 - `ParallelDownloader`：分块并行下载引擎，使用 `FileChannel` positioned write 和分块级 401 重试（已实现，尚未接入主流程）
 - `FusClient.downloadFile()` 新增 `onAuthRefresh` 参数：下载过程中返回 401 时调用回调以重新建立下载会话（先刷新 nonce，再发送 BinaryInit）
 - `DownloadModel.endJobSuccess()` 方法：显式标记任务成功完成，解决此前通过 `text == "done"` 硬编码字符串判断成功的不可靠问题
+- **专用异常类型**：新增 `AuthExpiredException`、`DownloadTimeoutException`、`ConnectionClosedException`，替代通过异常消息字符串匹配判断错误类型的方式
+- **`copying` 字符串资源**：将硬编码的 "Copying" 状态文本本地化（base + zh-rCN）
 
 ### Changed
 - **用 Ktor 流式下载替换 Ketch**：`FusClient.downloadFile()` 现直接使用 Ktor HTTP 客户端；移除 Ketch，因为它在下载前会发 HEAD 请求，消耗 FUS auth 并导致后续请求失败
@@ -17,6 +19,9 @@
 - 重构 `Downloader.performDownload()` — 将文件路径解析移出 try 块，减少嵌套
 - 在整个下载路径中添加 `[BifrostDownload]` 前缀的诊断日志
 - Gradle wrapper 版本升级到 9.6.1（与本地安装版本一致）
+- **`IFusClient` 默认实现**：`downloadFile` 默认实现现调用接口自身的抽象方法（`getAuthV()`、`getDownloadUrl()`），而非直接依赖 `FusClientLegacy` 具体类
+- **统一超时配置**：`IFusClient` 默认实现中 Android 分支的 socket/connect 超时从无限改为 60 秒/30 秒，与 `FusClient` 保持一致
+- **暂停检查提取为公共函数**：`waitWhilePaused()` 扩展函数替代 4 处重复的 while+delay 代码块
 
 ### Fixed
 - 从 `common/build.gradle.kts` 和 `desktop/build.gradle.kts` 移除未使用的 `jvmToolchain`
@@ -27,6 +32,11 @@
 - `ParallelDownloader` 添加 `@Deprecated` 标注（多线程下载速度不稳定，已改用单线程流式下载）
 - `getAuthV()` 修复变量遮蔽问题（本地 nonce 重命名为 `effectiveNonce`）
 - 连接断开异常检查排除 `FileSystemException`，避免将文件系统权限错误误判为可恢复的网络错误
+- **`FusClientLegacy.makeReq` 无限递归**：401 响应时无重试上限，现添加 `makeReqWithRetry` 限制最多 3 次重试
+- **`FusClient.downloadFile` NPE 风险**：`dest.openOutputStream(true)!!` 改为抛出带上下文的 `IOException`
+- **`DownloadModel._tempFiles` 线程安全**：改用 `synchronizedList`，`cleanupTempFiles` 在 `synchronized` 块中执行复合操作
+- **CRC32/MD5 校验失败时未清理临时文件**：校验失败时现主动调用 `cleanupTempFiles()`，避免损坏文件残留磁盘
+- **异常分类改用类型判断**：`FusClient` 和 `Downloader` 中 401/超时/连接断开的判断从字符串匹配改为 `is` 类型判断
 
 ---
 

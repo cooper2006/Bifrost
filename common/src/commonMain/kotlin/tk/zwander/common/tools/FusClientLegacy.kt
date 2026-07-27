@@ -74,6 +74,14 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
         data: String,
         signature: String?,
         includeNonce: Boolean,
+    ): String = makeReqWithRetry(request, data, signature, includeNonce, retryCount = 0)
+
+    private suspend fun makeReqWithRetry(
+        request: Request,
+        data: String,
+        signature: String?,
+        includeNonce: Boolean,
+        retryCount: Int,
     ): String {
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
             generateNonce()
@@ -99,9 +107,13 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
         println(request)
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
+            // 限制重试次数上限，避免 401 持续返回时无限递归导致栈溢出
+            if (retryCount >= 3) {
+                throw RuntimeException("认证持续失败（重试 $retryCount 次后仍为 401）")
+            }
             generateNonce()
 
-            return makeReq(request = request, data = data, signature = signature, includeNonce = includeNonce)
+            return makeReqWithRetry(request = request, data = data, signature = signature, includeNonce = includeNonce, retryCount = retryCount + 1)
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {

@@ -252,14 +252,15 @@ object FusClient : IFusClient<FusClient.Request> {
                     println("[BifrostDownload] downloadFile: GET response status=${response.status.value}")
 
                     if (response.status.value == 401) {
-                        throw RuntimeException("HTTP 401: Unauthorized")
+                        throw tk.zwander.common.exceptions.AuthExpiredException()
                     }
                     if (response.status.value != 200 && response.status.value != 206) {
                         throw RuntimeException("下载失败，状态码: ${response.status.value}")
                     }
 
                     val channel = response.bodyAsChannel()
-                    val outputStream = dest.openOutputStream(true)!!
+                    val outputStream = dest.openOutputStream(true)
+                        ?: throw java.io.IOException("无法打开输出流: ${dest.getAbsolutePath()}")
 
                     try {
                         var lastProgressTime = startTime
@@ -307,7 +308,7 @@ object FusClient : IFusClient<FusClient.Request> {
                 println("[BifrostDownload] downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
                 throw e
             } catch (e: Exception) {
-                val isAuth = e.message?.contains("401") == true
+                val isAuth = e is tk.zwander.common.exceptions.AuthExpiredException
                 if (isAuth && onAuthRefresh != null && authRetries < maxAuthRetries) {
                     authRetries++
                     println("[BifrostDownload] downloadFile: 401 during download, calling onAuthRefresh ($authRetries/$maxAuthRetries)")

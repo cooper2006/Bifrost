@@ -73,6 +73,8 @@
     <string name="checkingCRC">Checking CRC</string>
     <!-- Displayed when Bifrost is calculating the downloaded file's MD5 and checking it against Samsung's value -->
     <string name="checkingMD5">Checking MD5</string>
+    <!-- Displayed when Bifrost is copying a downloaded file from the temp directory to the target directory -->
+    <string name="copying">Copying</string>
     <!-- An action label for starting a firmware download -->
     <string name="download">Download</string>
     <!-- The accessibility label for downloading firmware -->

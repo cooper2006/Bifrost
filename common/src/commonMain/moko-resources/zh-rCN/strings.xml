@@ -101,6 +101,7 @@
 \n%2$s</string>
     <string name="csc">CSC</string>
     <string name="checkingMD5">校验 MD5</string>
+    <string name="copying">复制中</string>
     <string name="security">谷歌安全补丁：%1$s</string>
     <string name="chooseCsc">选择 CSC</string>
     <string name="versionCheckError">不能验证三星提供了正确的固件，你确定要下载吗？</string>

@@ -59,8 +59,12 @@ class DownloadModel : BaseModel("download_model") {
 
     /**
      * List of temporary files to clean up when download is cancelled.
+     *
+     * 使用 synchronizedList 保证线程安全：addTempFile 可能从下载协程调用，
+     * 而 cleanupTempFiles 可能从 UI 取消操作调用，两者可能并发执行。
+     * 迭代+清空是复合操作，需在 synchronized 块中执行。
      */
-    private val _tempFiles = mutableListOf<IPlatformFile>()
+    private val _tempFiles = java.util.Collections.synchronizedList(mutableListOf<IPlatformFile>())
 
     /**
      * Flag set by [endJobSuccess] to mark the job as successfully completed.
@@ -81,14 +85,16 @@ class DownloadModel : BaseModel("download_model") {
      * Clean up all temporary files.
      */
     fun cleanupTempFiles() {
-        _tempFiles.forEach { file ->
-            try {
-                file.delete()
-            } catch (_: Exception) {
-                // Ignore cleanup errors
+        synchronized(_tempFiles) {
+            _tempFiles.forEach { file ->
+                try {
+                    file.delete()
+                } catch (_: Exception) {
+                    // Ignore cleanup errors
+                }
             }
+            _tempFiles.clear()
         }
-        _tempFiles.clear()
     }
 
     /**

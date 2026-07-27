@@ -61,8 +61,9 @@ interface IFusClient<Request : IFusClient.IRequest> {
         dest: IPlatformFile,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
     ): String? {
-        val authV = FusClientLegacy.getAuthV()
-        val url = FusClientLegacy.getDownloadUrl(fileName)
+        // 调用接口自身的抽象方法，而非具体实现类
+        val authV = getAuthV()
+        val url = getDownloadUrl(fileName)
 
         return if (HostOS.current != HostOS.Android) {
             val task = ketch.tasks.value.find { it.request.url == url }
@@ -128,8 +129,8 @@ interface IFusClient<Request : IFusClient.IRequest> {
                 }
                 timeout {
                     this.requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                    this.socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                    this.connectTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    this.socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
+                    this.connectTimeoutMillis = 30_000L
                 }
             }
 

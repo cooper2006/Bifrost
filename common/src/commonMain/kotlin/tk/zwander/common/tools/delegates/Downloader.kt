@@ -3,6 +3,7 @@ package tk.zwander.common.tools.delegates
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.tools.CryptUtils
@@ -19,6 +20,16 @@ import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.commonCompose.model.DownloadModel
 import tk.zwander.samloaderkotlin.resources.MR
 import kotlin.time.ExperimentalTime
+
+/**
+ * 当下载处于暂停状态时阻塞，直到恢复。
+ * 统一替代各进度回调中重复的 while+delay 暂停检查。
+ */
+private suspend fun DownloadModel.waitWhilePaused() {
+    while (isPaused.value) {
+        delay(100)
+    }
+}
 
 object Downloader {
     interface DownloadErrorCallback {
@@ -225,10 +236,7 @@ object Downloader {
                                 )
                             },
                             progressCallback = { current, max, bps ->
-                                // Check for pause
-                                while (model.isPaused.value) {
-                                    kotlinx.coroutines.delay(100)
-                                }
+                                model.waitWhilePaused()
 
                                 model.progress.value = current to max
                                 model.speed.value = bps
@@ -251,11 +259,13 @@ object Downloader {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    val isAuth = e.message?.contains("401") == true
+                    val isAuth = e is tk.zwander.common.exceptions.AuthExpiredException
                     val isTimeout = e is java.net.SocketTimeoutException ||
+                        e is tk.zwander.common.exceptions.DownloadTimeoutException ||
                         e.message?.contains("timeout") == true ||
                         e.message?.contains("SocketTimeout") == true
-                    val isConnectionClosed = e.javaClass.simpleName.contains("ClosedByteChannel") ||
+                    val isConnectionClosed = e is tk.zwander.common.exceptions.ConnectionClosedException ||
+                        e.javaClass.simpleName.contains("ClosedByteChannel") ||
                         e.message?.contains("closed", ignoreCase = true) == true ||
                         (e is java.io.IOException && e !is java.nio.file.FileSystemException)
                     println("[BifrostDownload] performDownload: download error: ${e.javaClass.simpleName}: ${e.message}, isAuth=$isAuth, isTimeout=$isTimeout, isConnectionClosed=$isConnectionClosed")
@@ -281,10 +291,7 @@ object Downloader {
                     encFile.getLength(),
                     crc32,
                 ) { current, max, bps ->
-                    // Check for pause
-                    while (model.isPaused.value) {
-                        kotlinx.coroutines.delay(100)
-                    }
+                    model.waitWhilePaused()
 
                     model.progress.value = current to max
                     model.speed.value = bps
@@ -301,6 +308,7 @@ object Downloader {
 
                 if (!result) {
                     println("[BifrostDownload] performDownload: CRC32 check FAILED")
+                    model.cleanupTempFiles()
                     model.endJob(MR.strings.crcCheckFailed())
                     return
                 }
@@ -331,6 +339,7 @@ object Downloader {
 
                 if (!result) {
                     println("[BifrostDownload] performDownload: MD5 check FAILED")
+                    model.cleanupTempFiles()
                     model.endJob(MR.strings.md5CheckFailed())
                     return
                 }
@@ -341,7 +350,7 @@ object Downloader {
             if (tempDirectory != null && tempDirectory != downloadDirectory && extractedEncFile.getLength() < size) {
                 println("[BifrostDownload] performDownload: copying temp file to download dir")
                 model.speed.value = 0L
-                model.statusText.value = "Copying"
+                model.statusText.value = MR.strings.copying()
 
                 val input = encFile.openInputStream() ?: run {
                     println("[BifrostDownload] performDownload: copy input stream null, aborting")
@@ -360,17 +369,14 @@ object Downloader {
                         output = output,
                         size = encFile.getLength(),
                         progressCallback = { current, max, bps ->
-                            // Check for pause
-                            while (model.isPaused.value) {
-                                kotlinx.coroutines.delay(100)
-                            }
+                            model.waitWhilePaused()
 
                             model.progress.value = current to max
                             model.speed.value = bps
 
                             eventManager.sendEvent(
                                 Event.Download.Progress(
-                                    status = "Copying",
+                                    status = MR.strings.copying(),
                                     current = current,
                                     max = max,
                                 )
@@ -412,10 +418,7 @@ object Downloader {
                 key,
                 size,
             ) { current, max, bps ->
-                // Check for pause
-                while (model.isPaused.value) {
-                    kotlinx.coroutines.delay(100)
-                }
+                model.waitWhilePaused()
 
                 model.progress.value = current to max
                 model.speed.value = bps

@@ -146,4 +146,16 @@
 
     <string name="downloadMode">下载模式</string>
     <string name="downloadModeDesc">选择单线程 Ktor 流式下载（默认）或分块并行下载以获得大文件的更高性能。</string>
+
+    <string name="noFirmwareFoundError">未找到此型号和 CSC 的固件。请尝试不同的 CSC。</string>
+    <string name="invalidCscError">指定的 CSC 无效。请尝试不同的 CSC。</string>
+    <string name="paused">已暂停</string>
+    <string name="pause">暂停</string>
+    <string name="resume">恢复</string>
+    <string name="autoDecryptFirmware">下载后自动解密</string>
+    <string name="autoDecryptFirmwareDesc">下载完成后自动解密固件文件。禁用此选项可保留加密文件以便稍后手动解密。</string>
+    <string name="accessory_model_warning">警告！Bifrost 可能无法下载手表及其他配件的固件。如果下载失败，可尝试其他 CSC。</string>
+    <string name="donate">捐赠</string>
+    <string name="use_file_framework">使用文件框架</string>
+    <string name="use_file_framework_desc">Android 的默认文件访问框架不支持多连接下载，因此 Bifrost 必须先下载到内部存储，再将文件复制到目标目录。启用此选项将请求文件管理权限，允许 Bifrost 直接访问您的内部存储。</string>
 </resources>

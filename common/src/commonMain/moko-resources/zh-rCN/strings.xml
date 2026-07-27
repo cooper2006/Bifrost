@@ -158,4 +158,9 @@
     <string name="donate">捐赠</string>
     <string name="use_file_framework">使用文件框架</string>
     <string name="use_file_framework_desc">Android 的默认文件访问框架不支持多连接下载，因此 Bifrost 必须先下载到内部存储，再将文件复制到目标目录。启用此选项将请求文件管理权限，允许 Bifrost 直接访问您的内部存储。</string>
+
+    <string name="resumeDownloadTitle">恢复下载</string>
+    <string name="resumeDownloadMessage">您有 %1$d 个未完成的下载。是否要继续下载？</string>
+    <string name="resumeDownloadItem">%1$s — 已完成 %2$d/%3$d 个分块</string>
+    <string name="skipAll">全部跳过</string>
 </resources>

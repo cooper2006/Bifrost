@@ -5,7 +5,6 @@ package tk.zwander.common.tools
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
 import com.fleeksoft.ksoup.Ksoup
 import dev.zwander.kotlin.file.IPlatformFile
-import io.github.andreypfau.kotlinx.crypto.CRC32
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.headers
@@ -19,15 +18,11 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.InternalAPI
-import io.ktor.utils.io.readAvailable
-import kotlinx.io.InternalIoApi
 import io.ktor.utils.io.core.toByteArray
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
-import tk.zwander.common.util.DEFAULT_CHUNK_SIZE
-import tk.zwander.common.util.DownloadStateManager
 import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
 
@@ -53,12 +48,11 @@ object FusClient : IFusClient<FusClient.Request> {
     private var sessionId: String = ""
 
     override suspend fun getNonce(): String {
-        return stateMutex.withLock {
-            if (currentState.nonce.isBlank()) {
-                generateNonce()
-            }
-            currentState.nonce
+        if (nonce.isBlank()) {
+            generateNonce()
         }
+
+        return nonce
     }
 
     suspend fun refreshNonce() {
@@ -85,7 +79,6 @@ object FusClient : IFusClient<FusClient.Request> {
     private suspend fun makeSignatureHash(signature: String?): String? {
         if (signature == null) return null
 
-        val nonce = stateMutex.withLock { currentState.nonce }
         val hasher = CryptUtils.md5Provider.hasher()
         val a = hasher.hash("auth:$nonce:00000001".toByteArray()).toHexString()
         val b = hasher.hash("interface:$signature".toByteArray()).toHexString()
@@ -100,7 +93,8 @@ object FusClient : IFusClient<FusClient.Request> {
                 val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
                 CharArray(16) { chars.random() }.joinToString("")
             }
-            nonceVal to currentState.auth
+            includeNonce -> nonce
+            else -> ""
         }
         return "FUS nonce=\"${if (cloud) effectiveNonce else this.nonce}\", " +
                 "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: this.auth}\", " +
@@ -168,7 +162,7 @@ object FusClient : IFusClient<FusClient.Request> {
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {
             try {
-                val newNonce = response.headers["NONCE"] ?: response.headers["nonce"] ?: ""
+                nonce = response.headers["NONCE"] ?: response.headers["nonce"] ?: ""
 
                 try {
                     auth = CryptUtils.decryptNonce(nonce.take(16).padEnd(16, '0'))
@@ -185,7 +179,7 @@ object FusClient : IFusClient<FusClient.Request> {
         }
 
         if (response.headers["Set-Cookie"] != null || response.headers["set-cookie"] != null) {
-            val newSessionId = response.headers.entries()
+            sessionId = response.headers.entries()
                 .firstNotNullOfOrNull { headers ->
                     headers.value.find { value ->
                         value.contains("JSESSIONID=") ||
@@ -195,31 +189,11 @@ object FusClient : IFusClient<FusClient.Request> {
                 ?.replace("JSESSIONID=", "")
                 ?.replace("SESSION=", "")
                 ?.replace(Regex(";.*$"), "")
-
-            newSessionId?.let { sessionId ->
-                stateMutex.withLock {
-                    currentState = currentState.copy(sessionId = sessionId)
-                }
-            }
+                ?: sessionId
         }
 
         return body
     }
-
-    /** Number of parallel chunks for firmware download. */
-    private const val DownloadChunkCount = 4
-
-    /** Max retries per chunk on non-auth failure. */
-    private const val MaxChunkRetries = 3
-
-    /** Progress update interval in bytes (10MB). */
-    private const val ProgressUpdateInterval = 10L * 1024 * 1024
-
-    /** HTTP connection timeout in milliseconds (30 seconds). */
-    private const val HTTP_CONNECT_TIMEOUT_MS = 30_000
-
-    /** Minimum interval between nonce refreshes in milliseconds (5 seconds). */
-    private const val MIN_NONCE_REFRESH_INTERVAL_MS = 5_000L
 
     /**
      * 从三星服务器下载文件（单线程流式下载）。

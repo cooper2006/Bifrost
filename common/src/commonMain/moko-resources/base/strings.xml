@@ -282,4 +282,9 @@
 
     <string name="downloadMode">Download Mode</string>
     <string name="downloadModeDesc">Select between single-threaded Ktor streaming (default) or chunked parallel downloads for improved performance on large files.</string>
+
+    <string name="resumeDownloadTitle">Resume Download</string>
+    <string name="resumeDownloadMessage">You have %1$d incomplete download(s). Would you like to resume them?</string>
+    <string name="resumeDownloadItem">%1$s — %2$d/%3$d chunks completed</string>
+    <string name="skipAll">Skip All</string>
 </resources>

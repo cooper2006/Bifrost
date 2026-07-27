@@ -4,10 +4,6 @@ package tk.zwander.common.tools
 
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
 import com.fleeksoft.ksoup.Ksoup
-import com.linroid.ketch.api.Destination
-import com.linroid.ketch.api.DownloadRequest
-import com.linroid.ketch.api.DownloadState
-import com.linroid.ketch.api.KetchError
 import dev.zwander.kotlin.file.IPlatformFile
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
@@ -17,23 +13,22 @@ import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.core.toByteArray
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.launch
-import kotlinx.io.InternalIoApi
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
 import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
-import tk.zwander.common.util.ketch
 
 /**
  * 管理与三星服务器的通信。
@@ -118,14 +113,18 @@ object FusClient {
      * @return 响应正文数据，作为文本。通常是XML。
      */
     suspend fun makeReq(request: Request, data: String = "", signature: String? = null): String {
+        println("[BifrostDownload] makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
+            println("[BifrostDownload] makeReq: nonce blank, generating...")
             generateNonce()
         }
 
         val authV = getAuthV(cloud = request.cloud, signature = signature)
+        val url = "https://neofussvr.sslcs.cdngc.net/${request.value}"
+        println("[BifrostDownload] makeReq: POST $url, sessionId=${sessionId.take(8)}...")
 
         val response =
-            globalHttpClient.request("https://neofussvr.sslcs.cdngc.net/${request.value}") {
+            globalHttpClient.request(url) {
                 method = HttpMethod.Post
                 headers {
                     append("Authorization", authV)
@@ -135,10 +134,13 @@ object FusClient {
                 }
                 setBody(data)
             }
+        println("[BifrostDownload] makeReq: response status=${response.status.value}")
 
         val body = response.bodyAsText()
+        println("[BifrostDownload] makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
+            println("[BifrostDownload] makeReq: got 401, regenerating nonce and retrying")
             generateNonce()
 
             return makeReq(request, data)
@@ -180,126 +182,116 @@ object FusClient {
     }
 
     /**
-     * 从三星服务器下载文件。
+     * 从三星服务器下载文件（单线程流式下载）。
+     * 直接使用 Ktor HTTP 客户端，避免 Ketch 库在下载前自动发 HEAD 请求消耗 auth。
+     *
      * @param fileName 要下载的文件名。
      * @param start 可选的偏移量。用于恢复下载。
      * @param size 文件大小
      * @param dest 目标文件
      * @param progressCallback 进度回调
+     * @param onAuthRefresh 授权刷新回调，在 401 时调用以重新建立下载会话（如 BinaryInit）
      */
-    @OptIn(InternalAPI::class, InternalIoApi::class)
+    @OptIn(InternalAPI::class)
     suspend fun downloadFile(
         fileName: String,
         start: Long = 0,
         size: Long,
         dest: IPlatformFile,
+        onAuthRefresh: (suspend () -> Unit)? = null,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
     ): String? {
+        println("[BifrostDownload] downloadFile start: fileName=$fileName, start=$start, size=${size}bytes (${size / (1024 * 1024)}MB), dest=${dest.getAbsolutePath()}")
         val url = getDownloadUrl(fileName)
+        println("[BifrostDownload] downloadFile: url=$url")
 
-        // 获取 Content-MD5。
+        // 单线程 Ktor 流式下载，不经过 Ketch（Ketch 内部会先发 HEAD 消耗 auth）
+        println("[BifrostDownload] downloadFile: using Ktor single-thread streaming mode, size=${size / (1024 * 1024)}MB")
+
         val authV = getAuthV(cloud = true)
-
-        val md5 = globalHttpClient.prepareRequest {
-            method = HttpMethod.Head
-            url(url)
-            headers {
-                append("Authorization", authV)
-                append("User-Agent", "SMART 2.0")
-                if (start > 0) {
-                    append("Range", "bytes=${start}-")
-                }
-            }
-            timeout {
-                this.requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                this.socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                this.connectTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-            }
-        }.execute { response ->
-            response.headers["Content-MD5"]
-        }
-
-        // 根据文件大小决定是否使用并行下载
-        val useParallelDownload = size > 100L * 1024 * 1024  // 大于100MB使用并行下载
-        
-        if (useParallelDownload) {
-            println("使用并行下载模式，文件大小: ${size / (1024 * 1024)}MB")
-            return ParallelDownloader.downloadFile(
-                fileName = fileName,
-                start = start,
-                size = size,
-                dest = dest,
-                progressCallback = progressCallback,
-                authV = authV,
-            )
-        }
-
-        val task = ketch.tasks.value.find { it.request.url == url }
-            ?.let { download ->
-                download.resume(Destination(dest.getAbsolutePath()))
-                download.takeIf {
-                    it.state.value !is DownloadState.Completed
-                }
-            } ?: ketch.download(
-            DownloadRequest(
-                url = url,
-                destination = Destination(dest.getAbsolutePath()),
-                headers = mapOf(
-                    "Authorization" to authV,
-                    "User-Agent" to "SMART 2.0",
-                    "Cache-Control" to "no-cache",
-                ),
-            ),
-        )
-
-        CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO) {
-            task.state.collect {
-                if (it is DownloadState.Downloading) {
-                    progressCallback(
-                        it.progress.downloadedBytes,
-                        size,
-                        it.progress.bytesPerSecond,
-                    )
-                }
-            }
-        }
+        val destPath = dest.getAbsolutePath()
+        val buffer = ByteArray(64 * 1024) // 64KB buffer
+        val startTime = System.currentTimeMillis()
+        var downloadedBytes = start
 
         try {
-            // 有界重试：Ketch 可能内部重试，但防止无限循环
-            var ketchRetries = 0
-            val maxKetchRetries = 3
-
-            while (ketchRetries <= maxKetchRetries) {
-                val result = task.await()
-
-                if (result.isSuccess) {
-                    break
-                }
-
-                (result.exceptionOrNull() as? KetchError)?.let { error ->
-                    if (!error.isRetryable) {
-                        throw error
+            globalHttpClient.prepareRequest {
+                method = HttpMethod.Get
+                url(url)
+                headers {
+                    append("Authorization", authV)
+                    append("User-Agent", "SMART 2.0")
+                    append("Cache-Control", "no-cache")
+                    if (start > 0) {
+                        append("Range", "bytes=$start-")
                     }
                 }
+                timeout {
+                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
+                    connectTimeoutMillis = 30_000L
+                }
+            }.execute { response ->
+                println("[BifrostDownload] downloadFile: GET response status=${response.status.value}")
 
-                ketchRetries++
+                if (response.status.value == 401) {
+                    throw RuntimeException("HTTP 401: Unauthorized")
+                }
+                if (response.status.value != 200 && response.status.value != 206) {
+                    throw RuntimeException("下载失败，状态码: ${response.status.value}")
+                }
+
+                val channel = response.bodyAsChannel()
+                val outputStream = dest.openOutputStream(true)!!
+
+                try {
+                    var lastProgressTime = startTime
+                    var lastLogTime = startTime
+
+                    while (!channel.isClosedForRead) {
+                        val bytesRead = channel.readAvailable(buffer)
+                        if (bytesRead <= 0) break
+
+                        outputStream.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        val now = System.currentTimeMillis()
+                        val elapsed = (now - startTime) / 1000.0
+                        val bps = if (elapsed > 0) (downloadedBytes / elapsed).toLong() else 0L
+
+                        // 进度回调节流，每 500ms 触发一次
+                        if (now - lastProgressTime > 500) {
+                            progressCallback(downloadedBytes, size, bps)
+                            lastProgressTime = now
+                        }
+
+                        // 每 5 秒打印一次下载进度日志
+                        if (now - lastLogTime > 5000) {
+                            val pct = if (size > 0) String.format("%.1f", downloadedBytes * 100.0 / size) else "0"
+                            println("[BifrostDownload] progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
+                            lastLogTime = now
+                        }
+                    }
+                } finally {
+                    outputStream.flush()
+                    outputStream.close()
+                }
+
+                // 最终进度回调
+                val elapsedTotal = (System.currentTimeMillis() - startTime) / 1000.0
+                val bps = if (elapsedTotal > 0) (downloadedBytes / elapsedTotal).toLong() else 0L
+                progressCallback(downloadedBytes, size, bps)
+
+                println("[BifrostDownload] downloadFile: done: ${downloadedBytes / (1024 * 1024)}MB in ${String.format("%.1f", elapsedTotal)}s, bps=${bps / 1024}KB/s")
             }
 
-            if (ketchRetries > maxKetchRetries) {
-                throw RuntimeException("下载重试次数超限")
-            }
-        } catch (_: CancellationException) {
-            task.pause()
-        }
-
-        return md5
-    }
-
-    private fun KetchError.isAuthFailure(): Boolean {
-        return when (this) {
-            is KetchError.Http -> code == 401
-            is KetchError.AuthenticationFailed -> true
-            else -> false
+            return null
+        } catch (e: CancellationException) {
+            println("[BifrostDownload] downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
+            throw e
+        } catch (e: Exception) {
+            println("[BifrostDownload] downloadFile: failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw e
         }
     }
 

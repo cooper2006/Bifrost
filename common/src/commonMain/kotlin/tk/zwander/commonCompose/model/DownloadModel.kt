@@ -70,7 +70,12 @@ class DownloadModel : BaseModel("download_model") {
 
     override fun onEnd(text: String) {
         super.onEnd(text)
-        // Clean up temp files when job ends (cancel or complete)
-        cleanupTempFiles()
+        // Only clean up temp files on success or user cancellation.
+        // On failure, keep partially downloaded files so the next attempt
+        // can resume from the current offset.
+        val isSuccess = text.isBlank() || text == "done"
+        if (isSuccess) {
+            cleanupTempFiles()
+        }
     }
 }

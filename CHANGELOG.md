@@ -4,15 +4,21 @@
 - **Pause/Resume button** in the Downloader tab — toggle pause during firmware download, resume with a single click
 - **Automatic temp file cleanup** — when a download is cancelled or completed, temporary encrypted firmware files are deleted from disk
 - `pause.svg` / `play.svg` icons for the pause/resume button
+- **HTTP Range resume** — failed/interrupted downloads now resume from the current file offset via `Range: bytes={start}-` instead of restarting from zero
+- **Socket timeout handling** — downloads now abort on 60s socket idle and automatically retry/resume (previously blocked indefinitely on a silently-closed connection)
+- `ParallelDownloader` — chunked parallel download engine with `FileChannel` positioned writes and per-chunk 401 retry (implemented but not yet wired into the main flow)
 
 ### Changed
-- **Nonce refresh retry** — if Samsung returns a transient 401 between `BinaryInit` and the actual file download, the app regenerates the FUS nonce and retries (up to 3 times) instead of failing immediately
+- **Replaced Ketch with Ktor streaming** — `FusClient.downloadFile()` now uses the Ktor HTTP client directly; Ketch was removed because it issued a pre-download HEAD request that consumed the FUS auth and broke subsequent requests
+- **Nonce refresh retry** — if Samsung returns a transient 401 between `BinaryInit` and the actual file download, the app regenerates the FUS nonce and retries (up to 10 times, was 3) instead of failing immediately; retry now also covers socket timeouts and connection-closed errors
+- **Temp file cleanup policy** — `DownloadModel.onEnd()` now only cleans up temp files on success or user cancellation; on failure the partial download is kept so the next attempt can resume
 - Refactored `Downloader.performDownload()` — moved file path resolution outside the try block, reduced nesting
+- Added `[BifrostDownload]` prefixed logging throughout the download path for diagnostics
 
 ### Fixed
 - Removed unused `jvmToolchain` from `common/build.gradle.kts` and `desktop/build.gradle.kts`
-- Added `java.sql` module to desktop JVM module list (required by SQLite/Ketch)
-- Removed debug `println` of auth token from Ketch `DownloadRequest` headers
+- Added `java.sql` module to desktop JVM module list (required by SQLite)
+- Removed debug `println` of auth token from download request headers
 
 ---
 

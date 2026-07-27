@@ -2,7 +2,7 @@
 
 本文档详细介绍点击"下载"按钮后，Bifrost 从三星服务器获取固件的完整技术流程。涵盖代码层面与实际运行时行为。
 
-> **文档版本：** v2.2.0+（含暂停/恢复、临时文件清理、Nonce 刷新重试）
+> **文档版本：** v2.3.0+（Ktor 流式下载、断点续传、连接超时重试、失败保留临时文件）
 
 ---
 
@@ -36,10 +36,11 @@
                ▼
 ┌─────────────────────────────────────┐
 │ 4. 下载加密固件文件                   │
-│    - Ketch 多连接下载                 │
+│    - Ktor 单线程流式下载（默认）       │
+│    - 支持 HTTP Range 断点续传         │
 │    - 进度回调更新 UI                  │
-│    - 支持暂停/恢复                    │
-│    - 401 自动重试 + Nonce 刷新        │
+│    - 支持暂停/恢复（UI 层）           │
+│    - 401/超时/断连 自动重试 + Nonce 刷新 │
 └──────────────┬──────────────────────┘
                │
                ▼
@@ -102,7 +103,7 @@ User-Agent: Kies2.0_FUS
 
 ## 阶段二：点击下载（Download）
 
-点击 **Download** 按钮触发 `Downloader.onDownload()`（[代码](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L40)）。
+点击 **Download** 按钮触发 `Downloader.onDownload()`（[代码](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L38)）。
 
 ### 2.1 获取固件文件信息
 
@@ -181,6 +182,10 @@ User-Agent: SMART 2.0
 confirmCallback.onError(
     info = DownloadErrorInfo(
         message = exception.message!!,   // VersionException 的 message 始终非空
+        callback = DownloadErrorConfirmCallback(
+            onAccept = { performDownload(info!!, model) },
+            onCancel = { model.endJob(""); eventManager.sendEvent(Event.Download.Finish) },
+        ),
     ),
 )
 ```
@@ -229,35 +234,117 @@ fun extractV4Key(): Pair<ByteArray, String>? {
 POST https://neofussvr.sslcs.cdngc.net/NF_SmartDownloadBinaryInitForMass.do
 ```
 
-### 3.3 Nonce 过期重试机制
+### 3.3 Nonce 过期与断连重试机制
 
-三星的 FUS nonce 可能在 BinaryInit 和实际下载之间过期（返回 HTTP 401）。`Downloader.performDownload()` 在 v2.2.0+ 中实现了有界自动重试逻辑：
+三星的 FUS nonce 可能在 BinaryInit 和实际下载之间过期（返回 HTTP 401），或在下载大文件（17GB+）时发生 socket 超时 / 连接关闭。`Downloader.performDownload()` 实现了有界自动重试逻辑（[代码行 169-258](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L169)）：
 
 ```kotlin
-val maxInitRetries = 3    // 最多重试 3 次
+val maxInitRetries = 10
 var initRetries = 0
+var md5: String? = null
 
 while (initRetries <= maxInitRetries) {
     if (initRetries > 0) {
         FusClient.refreshNonce()  // 重新生成 nonce
     }
-    // 重新执行 BinaryInit + 下载
+    // 重新执行 BinaryInit
     FusClient.makeReq(BINARY_INIT, request)
-    FusClient.downloadFile(...)
-    break   // 成功退出
-    // 401 时 catch → initRetries++ → continue
+
+    try {
+        // 断点续传：已下载字节数作为 start 参数
+        val existingLen = extractedEncFile.getLength()
+        md5 = if (existingLen < size) {
+            FusClient.downloadFile(
+                fileName = path + fileName,
+                start = encFile.getLength(),   // 从当前偏移继续
+                size = size,
+                dest = encFile,
+                onAuthRefresh = { /* 401 时重新发 BinaryInit */ },
+            ) { current, max, bps -> /* 进度回调 */ }
+        } else {
+            null  // 文件已完整，跳过下载
+        }
+        break  // 下载成功
+    } catch (e: Exception) {
+        val isAuth = e.message?.contains("401") == true
+        val isTimeout = e is SocketTimeoutException || ...
+        val isConnectionClosed = e is IOException || ...
+        if ((isAuth || isTimeout || isConnectionClosed) && initRetries < maxInitRetries) {
+            initRetries++
+            continue   // 从当前文件偏移续传
+        }
+        throw e
+    }
 }
 ```
 
-> **注意：** 每次重试都会刷新 nonce、重建 BinaryInit、清除上次失败的 Ketch 任务、重新执行整个流程。
+重试覆盖三类瞬时故障：
+- **401 认证过期**：刷新 nonce + 重新 BinaryInit
+- **Socket 超时**：从当前文件偏移续传
+- **连接关闭 / IOException**：从当前文件偏移续传
+
+> **注意：** 每次重试都会刷新 nonce、重建 BinaryInit，但**不会清空已下载的文件**——`start = encFile.getLength()` 实现断点续传，避免大文件重头下载。
 
 ---
 
 ## 阶段四：文件下载与文件管理
 
-### 4.1 文件路径与命名
+### 4.1 下载引擎：Ktor 单线程流式
 
-下载开始前，`performDownload()` 会构造以下文件路径（[代码行 77-117](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L77)）：
+当前版本使用 Ktor HTTP 客户端直接流式下载，**不再依赖 Ketch 库**（[FusClient.kt L196-296](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/FusClient.kt#L196)）。迁移原因：Ketch 在下载前会自动发送 HEAD 请求，消耗 FUS auth 导致后续请求失败。
+
+```kotlin
+globalHttpClient.prepareRequest {
+    method = HttpMethod.Get
+    url(url)
+    headers {
+        append("Authorization", authV)
+        append("User-Agent", "SMART 2.0")
+        append("Cache-Control", "no-cache")
+        if (start > 0) {
+            append("Range", "bytes=$start-")   // 断点续传
+        }
+    }
+    timeout {
+        requestTimeoutMillis = INFINITE
+        socketTimeoutMillis = 60_000   // 60 秒无数据则超时
+        connectTimeoutMillis = 30_000
+    }
+}.execute { response ->
+    val channel = response.bodyAsChannel()
+    val outputStream = dest.openOutputStream(true)
+    val buffer = ByteArray(64 * 1024)   // 64KB buffer
+    while (!channel.isClosedForRead) {
+        val bytesRead = channel.readAvailable(buffer)
+        if (bytesRead <= 0) break
+        outputStream.write(buffer, 0, bytesRead)
+        downloadedBytes += bytesRead
+        // 进度回调（500ms 节流）
+    }
+}
+```
+
+特性：
+- **单线程流式**：避免多连接对 FUS auth 的并发消耗
+- **断点续传**：通过 `Range: bytes={start}-` 头实现，从已下载偏移继续
+- **超时策略**：socket 60 秒无数据超时，避免连接静默断开后无限阻塞
+- **进度节流**：进度回调每 500ms 触发一次，避免高频 StateFlow 发射
+
+### 4.2 ParallelDownloader（已实现，尚未接入）
+
+`ParallelDownloader`（[ParallelDownloader.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/ParallelDownloader.kt)）提供了分块并行下载能力，当前代码库已实现但**主下载流程尚未调用**，仍由 `FusClient.downloadFile` 单线程处理。其设计供后续启用：
+
+- **动态分块**：50MB–500MB，按文件大小自适应（[calculateChunkSize](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/ParallelDownloader.kt#L54)）
+- **并发上限 4**：`DEFAULT_CONNECTIONS = 4`（曾为 8，降并发以减内存压力）
+- **FileChannel positioned write**：线程安全并发写入，避免共享 RandomAccessFile 的 seek/write 竞争
+- **分块级 401 重试**：单分块 401 时回滚该分块进度计数，通过 `authProvider` 刷新 nonce 重试（最多 3 次）
+- **Auth 刷新互斥**：`Mutex` 保护，多分块同时 401 时只刷新一次，避免级联失效
+
+> ⚠️ 启用前需评估多连接并发对 FUS nonce/auth 的消耗——当前单线程方案正是为规避此问题而设计。
+
+### 4.3 文件路径与命名
+
+下载开始前，`performDownload()` 会构造以下文件路径（[代码行 91-135](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L91)）：
 
 | 变量 | 路径 | 说明 |
 |------|------|------|
@@ -266,20 +353,20 @@ while (initRetries <= maxInitRetries) {
 | `decFile` | `downloadDir / fullFileName.replace(.enc2/.enc4, "")` | 解密后的固件 |
 | `decKeyFile` | `downloadDir / DecryptionKey_fullFileName.txt` | 解密密钥（可选） |
 
-文件名规则（[代码行 86-89](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L86)）：
+文件名规则（[代码行 91-94](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L91)）：
 
 ```kotlin
 val fullFileName = fileName.replace(
     ".zip",
     "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
-)
+).substringAfterLast("/")
 ```
 
 > ⚠️ 三星固件版本字符串较长（如 `G970FXXU6HVH1/G970FOXM6HVH1/...`），替换后文件名可能超过文件系统的 255 字符限制。
 
-### 4.2 临时文件跟踪与清理
+### 4.4 临时文件跟踪与清理
 
-所有文件路径注册到 `DownloadModel._tempFiles` 列表（[代码行 128-131](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L128)）：
+所有文件路径注册到 `DownloadModel._tempFiles` 列表（[代码行 139-142](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L139)）：
 
 ```kotlin
 model.addTempFile(encFile)          // 加密文件（临时）
@@ -288,19 +375,28 @@ model.addTempFile(decFile)          // 解密后的固件
 model.addTempFile(decKeyFile)       // 解密密钥
 ```
 
-`onEnd()` 被调用时会执行 `cleanupTempFiles()`（[DownloadModel.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/model/DownloadModel.kt#L60)）。
-
-> ⚠️ **注意：** `onEnd()` 在 成功、失败、取消 三种路径上都会被调用。这意味着下载成功后，`decFile`（解密固件）和 `decKeyFile`（密钥）也会被 cleanup 删除。这是当前代码中的一个 **关键 Bug**——成功路径上的文件应当从 `_tempFiles` 中移除后再调用 `endJob`。
-
----
-
-### 4.3 MD5 探测（HEAD 请求）
-
-### 4.4 暂停 / 恢复机制
-
-暂停/恢复按钮（[DownloadView.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/view/pages/DownloadView.kt#L172)）：
+`onEnd()` 被调用时执行 `cleanupTempFiles()`（[DownloadModel.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/model/DownloadModel.kt#L70)）。当前实现（v2.3.0+）按结果分支处理：
 
 ```kotlin
+override fun onEnd(text: String) {
+    super.onEnd(text)
+    // 仅在成功或用户取消时清理；失败时保留已下载部分以便下次续传
+    val isSuccess = text.isBlank() || text == "done"
+    if (isSuccess) {
+        cleanupTempFiles()
+    }
+}
+```
+
+> **变更说明（v2.3.0+）：** 此前 `onEnd()` 在所有路径（含失败）上都执行 cleanup，会删除已下载的加密文件，使断点续传失效。现已修正为**仅成功/取消时清理，失败时保留**，配合 `start = encFile.getLength()` 实现失败后重试的续传。
+
+### 4.5 暂停 / 恢复机制
+
+暂停/恢复按钮（[DownloadView.kt L157-165](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/commonCompose/view/pages/DownloadView.kt#L157)）：
+
+```kotlin
+val isPaused by model.isPaused.collectAsState(false)
+// ...
 onClick = {
     model.isPaused.value = !model.isPaused.value   // 切换 boolean 标志
 }
@@ -310,81 +406,20 @@ onClick = {
 
 | 检查点 | 代码行 | 说明 |
 |--------|--------|------|
-| Ketch 下载进度回调 | L181-183 | 暂停进度更新 |
-| CRC32 校验 | L229-231 | 暂停 CRC 校验 |
-| 文件复制（Android） | L295-297 | 暂停文件复制 |
-| AES 解密 | L342-344 | 暂停解密 |
+| Ktor 下载进度回调 | L213-216 | 暂停进度更新 |
+| CRC32 校验 | L269-272 | 暂停 CRC 校验 |
+| 文件复制（Android） | L348-351 | 暂停文件复制 |
+| AES 解密 | L401-404 | 暂停解密 |
 
-> ⚠️ **已知局限性：** 当前暂停机制仅暂停进度回调和后续阶段，**不会暂停底层的 Ketch 网络下载**。如果用户在下载过程中点击暂停：
+> ⚠️ **已知局限性：** 当前暂停机制仅暂停进度回调和后续阶段，**不会暂停底层的 Ktor 网络流读取**。如果用户在下载过程中点击暂停：
 > 1. 进度停止更新（UI 冻结）
-> 2. Ketch 继续在后台下载
-> 3. 下载完成后，progress callback 不再被调用，`while` 循环退出
+> 2. Ktor 仍在后台读取响应体并写入文件
+> 3. 下载完成后，进度回调不再被调用，`while` 循环退出
 > 4. 流程继续进入 CRC/解密阶段
 >
-> 用户看到"已暂停"但实际下载仍在进行——这是一个 **行为与预期不符的功能缺陷**。
+> 用户看到"已暂停"但实际下载仍在进行——这是一个**行为与预期不符的功能缺陷**。修复需在 `while (isPaused)` 循环内同时挂起读取循环，或对 Ktor 读取协程做取消/恢复控制。
 
-### 4.5 Ketch 下载循环与有界重试
-
-Bifrost 使用 [Ketch](https://github.com/linroid/Ketch) 库进行文件下载（[代码行 219-277](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/FusClient.kt#L219)）：
-
-```kotlin
-ketch.download(
-    DownloadRequest(
-        url = url,
-        destination = Destination(destPath),
-        headers = mapOf(
-            "Authorization" to authV,
-            "User-Agent" to "SMART 2.0",
-            "Cache-Control" to "no-cache",
-        ),
-    ),
-)
-```
-
-Ketch 支持：
-- **多线程分片下载**：将文件分为多个分段并行下载
-- **断点续传**：通过现有任务查找恢复
-- **自动重试**：内部有界重试（最多 3 次）
-
-下载循环（[代码行 249-277](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/FusClient.kt#L249)）：
-
-```kotlin
-var ketchRetries = 0
-val maxKetchRetries = 3
-
-while (ketchRetries <= maxKetchRetries) {
-    val result = task.await()
-    if (result.isSuccess) break
-
-    (result.exceptionOrNull() as? KetchError)?.let { error ->
-        if (!error.isRetryable) throw error   // 不可重试直接抛出
-    }
-    ketchRetries++
-}
-// 超过最大重试次数后抛出 RuntimeException
-```
-
-### 4.6 进度追踪
-
-下载过程中通过 `task.state.collect` 收集 Ketch 的状态（[FusClient.kt L237-247](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/FusClient.kt#L237)）：
-
-```kotlin
-CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO) {
-    task.state.collect {
-        if (it is DownloadState.Downloading) {
-            progressCallback(
-                it.progress.downloadedBytes,   // 已下载字节
-                size,                            // 总大小
-                it.progress.bytesPerSecond,     // 实时速度
-            )
-        }
-    }
-}
-```
-
-> **注意：** 进度收集与主协程并发运行。即使进度协程因暂停标志而阻塞，Ketch 仍会继续下载。
-
-### 4.7 下载授权与 Nonce 管理
+### 4.6 下载授权与 Nonce 管理
 
 FusClient 管理完整的 FUS 会话生命周期（[FusClient.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/FusClient.kt)）：
 
@@ -395,17 +430,15 @@ FusClient 管理完整的 FUS 会话生命周期（[FusClient.kt](/Users/cooper/
 - **Session Cookie**：响应头的 `Set-Cookie` 中的 `JSESSIONID`
 - **401 自动刷新**：`makeReq()` 和 `performDownload()` 都内置 401 检测与 nonce 刷新
 
-### 4.8 下载位置与临时文件管理
+### 4.7 下载位置与临时文件管理
 
 - **桌面端**：用户选择目标目录后直接下载
 - **Android**：先下载到 Bifrost 内部数据目录（临时目录），再复制到用户选择的目标目录
-- **临时文件追踪**：`DownloadModel` 维护 `_tempFiles` 列表，任务完成或取消时自动清理
+- **临时文件追踪**：`DownloadModel` 维护 `_tempFiles` 列表，任务成功或取消时自动清理；失败时保留以便续传
 
 ---
 
 ## 阶段五：完整性校验
-
-
 
 ### 5.1 CRC32 校验
 
@@ -428,29 +461,27 @@ val result = CryptUtils.checkCrc32(
 
 ### 5.2 MD5 校验
 
-如果三星服务器在 HTTP 响应头中返回了 `Content-MD5`，Bifrost 还会进行 MD5 校验：
+如果三星服务器在 HTTP 响应头中返回了 `Content-MD5`，Bifrost 还会进行 MD5 校验。当前实现中 `FusClient.downloadFile()` 返回 `null`（不再主动探测 MD5），MD5 校验仅在显式获取到 md5 值时执行：
 
 ```kotlin
-// 下载前先 HEAD 请求探测 Content-MD5
-val md5 = httpClient.prepareRequest {
-    method = HttpMethod.Head
-    url(url)
-    headers { ... }
-}.execute { response ->
-    response.headers["Content-MD5"]
+val result = withContext(Dispatchers.Default) {
+    CryptUtils.checkMD5(md5, encFile.openInputStream())
 }
-
-// 下载完成后校验
-val result = CryptUtils.checkMD5(md5, encFile.openInputStream())
 ```
 
-采用与 CyanogenMod 相同的 MD5 校验算法。
+> **变更说明：** 早期版本通过 HEAD 请求探测 `Content-MD5`，现版本在 `downloadFile` 返回 md5 时才校验，避免额外请求消耗 auth。
 
 ---
 
 ## 阶段六：文件复制（中转处理）
 
-仅在 Android 平台上，当临时目录与目标目录不同时执行：
+仅在 Android 平台上，当临时目录与目标目录不同时、且文件未下载完整时执行（[代码行 326](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L326)）：
+
+```kotlin
+if (tempDirectory != null && tempDirectory != downloadDirectory && extractedEncFile.getLength() < size) {
+    // 从临时目录复制到目标目录
+}
+```
 
 1. 从临时目录打开加密文件的 `InputStream`
 2. 向目标目录打开 `OutputStream`
@@ -490,8 +521,8 @@ LOGIC_VALUE_FACTORY + LATEST_FW_VERSION
 
 ```kotlin
 CryptUtils.decryptProgress(
-    encryptedFileInputStream,
-    decryptedFileOutputStream,
+    extractedEncFile.openInputStream(),
+    decFile.openOutputStream(),
     key,          // 16 字节 AES 密钥
     fileSize,     // 加密文件大小
 ) { current, max, bps ->
@@ -507,7 +538,7 @@ CryptUtils.decryptProgress(
 
 如果开启了 `enableDecryptKeySave` 设置（[Settings.kt](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/util/Settings.kt#L49)），Bifrost 会在下载目录中额外生成一个 `.txt` 格式的解密密钥文件。
 
-> **关键时序说明：** 密钥文件在**下载开始前**即被写入（[Downloader.kt 行 118-131](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L118)），而非解密阶段。这样用户在下载过程中即可提前看到密钥。
+> **关键时序说明：** 密钥文件在**下载开始前**即被写入（[Downloader.kt 行 147-161](/Users/cooper/GitHub/bifrost-git/Bifrost/common/src/commonMain/kotlin/tk/zwander/common/tools/delegates/Downloader.kt#L147)），而非解密阶段。这样用户在下载过程中即可提前看到密钥。
 
 ```kotlin
 decKeyFile?.openOutputStream(false)?.use { output ->
@@ -566,7 +597,7 @@ hash("auth:${nonce}:00000001")
 
 ### 401 自动刷新
 
-所有 `FusClient.makeReq()` 调用都内置了 401 自动重试：如果服务器返回 401，自动重新生成 nonce 并重发请求。
+所有 `FusClient.makeReq()` 调用都内置了 401 自动重试：如果服务器返回 401（含 HTTP 状态码和 XML body 中的 `Status=401`），自动重新生成 nonce 并重发请求。
 
 ---
 
@@ -577,7 +608,8 @@ hash("auth:${nonce}:00000001")
 | `Downloader.kt` | 下载流程编排：onDownload → performDownload |
 | `DownloadView.kt` | UI 层：按钮、进度条、状态显示 |
 | `DownloadModel.kt` | 状态管理：进度、暂停标志、临时文件追踪 |
-| `FusClient.kt` | FUS 协议通信：Nonce 管理、请求签名、文件下载 |
+| `FusClient.kt` | FUS 协议通信：Nonce 管理、请求签名、Ktor 流式下载 |
+| `ParallelDownloader.kt` | 分块并行下载器（已实现，尚未接入主流程） |
 | `Request.kt` | 业务请求封装：BinaryInform、BinaryInit、版本校验 |
 | `VersionFetch.kt` | 最新版本检测：FOTA 接口 + SmartHistory 接口 |
 | `CryptUtils.kt` | 加解密：Nonce 解密、CRC32/MD5 校验、AES-ECB 解密 |
@@ -611,9 +643,9 @@ sequenceDiagram
     end
     REQ-->>DL: BinaryFileInfo
 
-    DL->>DL: 准备目录、临时文件路径
+    DL->>DL: 准备目录、临时文件路径、写入密钥文件
 
-    loop 最多重试 3 次
+    loop 最多重试 10 次
         DL->>FC: refreshNonce() (重试时)
         DL->>REQ: createBinaryInit(fileName, nonce)
         REQ-->>DL: BinaryInit XML
@@ -621,15 +653,14 @@ sequenceDiagram
         FC->>Sammy: POST BinaryInitForMass.do
         Sammy-->>FC: OK
 
-        DL->>FC: downloadFile(path, dest, size)
-        FC->>FC: HEAD 请求探测 Content-MD5
-        FC->>Sammy: GET NF_SmartDownloadBinaryForMass.do
+        DL->>FC: downloadFile(path, start=已下载偏移, size, dest)
+        FC->>Sammy: GET BinaryForMass.do (Range: bytes=start-)
         Sammy-->>FC: 加密固件数据流
-        FC-->>DL: Ketch 多连接下载
-        DL-->>UI: 进度回调 (bytes/sec)
-        alt 401 认证错误
-            FC-->>DL: KetchError (401)
-            DL->>DL: 刷新 Nonce 后重试
+        FC-->>DL: Ktor 流式下载
+        DL-->>UI: 进度回调 (bytes/sec, 500ms 节流)
+        alt 401 / 超时 / 断连
+            FC-->>DL: 异常
+            DL->>DL: 刷新 Nonce，从当前偏移续传
         else 下载完成
             break
         end
@@ -641,7 +672,7 @@ sequenceDiagram
         DL->>DL: 复制文件 临时 → 目标
     end
     DL->>DL: AES-ECB 解密 (.enc2/.enc4)
-    DL->>DM: cleanupTempFiles()
+    DL->>DM: onEnd() → 仅成功/取消时 cleanupTempFiles()
     DL-->>UI: 完成 / 错误信息
     UI-->>User: 显示结果
 ```
@@ -652,27 +683,29 @@ sequenceDiagram
 
 | 等级 | 问题 | 位置 | 状态 |
 |------|------|------|------|
-| 🔴 关键 | 成功下载后 `cleanupTempFiles()` 删除最终解密固件 | `DownloadModel.onEnd()` → `cleanupTempFiles()` | 未修复 |
-| 🔴 关键 | 暂停按钮不影响 Ketch 网络下载 | `DownloadView.kt` toggle → `isPaused` flag | 未修复 |
+| 🔴 关键 | 暂停按钮不影响 Ktor 网络流读取，下载仍在后台进行 | `DownloadView.kt` toggle → `isPaused` flag | 未修复 |
 | 🟡 中等 | `exception.message!!` 可能 NPE | `Downloader.kt:54` | 低风险，建议加固 |
-| 🟡 中等 | 文件名可能超过 255 字符限制 | `Downloader.kt:86-89` | 未修复 |
-| 🟡 中等 | `start` 参数语义矛盾：仅 MD5 探测使用，Ketch 自行管理断点续传 | `FusClient.kt:206-208` | 设计问题 |
-| 🟢 轻微 | 暂停检查使用 busy-wait `while(delay(100))` | `Downloader.kt` 4 处 | 可优化为 StateFlow 挂起 |
+| 🟡 中等 | 文件名可能超过 255 字符限制 | `Downloader.kt:91-94` | 未修复 |
+| 🟡 中等 | 暂停检查使用 busy-wait `while(delay(100))` | `Downloader.kt` 4 处 | 可优化为 StateFlow 挂起 |
 
 ## 已修复问题
 
 | 问题 | 修复内容 | 版本 |
 |------|----------|------|
+| 成功下载后 `cleanupTempFiles()` 误删最终文件 | 改为仅在成功/取消时清理，失败时保留以支持续传 | v2.3.0+ |
+| Ketch 库下载前自动发 HEAD 消耗 auth | 移除 Ketch，改用 Ktor 直接流式下载 | v2.3.0+ |
+| 大文件 socket 超时后无法恢复 | 实现 HTTP Range 断点续传 + 超时重试 | v2.3.0+ |
+| 下载连接静默断开后无限阻塞 | 设置 socket 60s 超时 | v2.3.0+ |
 | `downloadDirectory` 空指针 | 增加 null 检查，提前 return | v2.2.0 |
 | `v4Key?.first!!` NPE | 改为 `if (info.v4Key != null)` 安全分支 | v2.2.0 |
-| Ketch `while(true)` 无限循环 | 有界为最多 3 次重试后抛异常 | v2.2.0 |
 | 请求头中包含 `Set-Cookie`（只应是响应头） | 移除 | v2.2.0 |
-| MD5 探测使用 GET 请求 | 改为 HEAD 请求 | v2.2.0 |
+| MD5 探测使用 GET 请求 | 改为 HEAD 请求（现版本改为不主动探测，按返回值校验） | v2.2.0 |
 
 ## 代码变更记录
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| (当前) | 2026-06-24 | 移除 Ketch，改用 Ktor 流式下载；实现 Range 断点续传；socket 超时策略；失败保留临时文件；重试上限提升至 10 |
 | `d7570826` | 2026-06-24 | 暂停/恢复按钮、临时文件清理、401 重试循环 |
 | `b831bb77` | 2026-06-24 | changelog 更新 |
 
@@ -680,26 +713,23 @@ sequenceDiagram
 
 ### P1 - 关键缺陷修复
 
-1. **修复 `cleanupTempFiles()` 误删成功文件**
-   成功路径上的最终文件（`decFile`、`decKeyFile`）不应被 cleanup。在调用 `endJob(MR.strings.done())` 之前从 `_tempFiles` 中移除它们，或者将最终文件的跟踪与临时文件分开管理。
-
-2. **暂停按钮真正暂停 Ketch 下载**
-   当前暂停仅暂停进度回调，Ketch 仍在后台下载。需要维护一个对当前 Ketch `DownloadTask` 的引用，在暂停时调用 `task.pause()`，恢复时调用 `task.resume()`。
+1. **暂停按钮真正暂停网络下载**
+   当前暂停仅暂停进度回调，Ktor 仍在后台读取流。需要在 `while (isPaused)` 循环内同时挂起 Ktor 读取循环，或对读取协程做取消/恢复控制（如使用 `select` 或 `channel` 暂停读取）。
 
 ### P2 - 代码健壮性
 
-3. **`exception.message!!` → `exception.message ?: ""`** — 防御性编程，防止未来异常层级变更
-4. **文件名长度截断** — 对 `fullFileName` 增加长度校验，超出时截断版本号部分
-5. **`start` 参数语义清理** — 移除未使用的 `start` 参数，或在 Ketch 任务恢复时显式使用
+2. **`exception.message!!` → `exception.message ?: ""`** — 防御性编程，防止未来异常层级变更
+3. **文件名长度截断** — 对 `fullFileName` 增加长度校验，超出时截断版本号部分
+4. **接入 ParallelDownloader（可选）** — 启用分块并行下载前需验证多连接对 FUS auth 的并发影响，建议在 `authProvider` 中复用单次 nonce 刷新而非每分块独立刷新
 
 ### P3 - 性能与架构
 
-6. **暂停 busy-wait 改为挂起式**
+5. **暂停 busy-wait 改为挂起式**
    ```kotlin
    // 用 StateFlow.first {} 挂起，避免每 100ms 轮询
    model.isPaused.first { !it }
    ```
-7. **协程作用域管理** — `CoroutineScope(currentCoroutineContext()).launch()` 改用 `supervisorScope { launch { ... } }`
+6. **协程作用域管理** — `CoroutineScope(currentCoroutineContext()).launch()` 改用 `supervisorScope { launch { ... } }`
 
 ## 错误处理对照
 
@@ -708,10 +738,11 @@ sequenceDiagram
 | 服务器返回 400/401 | Nonce 过期，自动刷新后重试 | `FusClient.kt` / `Downloader.kt` |
 | 服务器返回 403 | 设备未找到或固件不可用，提示用户 | `Request.kt` / `Downloader.kt` |
 | 服务器返回 408 | IMEI/序列号无效 | `Request.kt` |
-| BinaryInit 后下载 401 | 最多重试 3 次，刷新 Nonce 后重新 Initialize | `Downloader.kt` `performDownload()` |
+| BinaryInit 后下载 401 | 最多重试 10 次，刷新 Nonce 后重新 Initialize | `Downloader.kt` `performDownload()` |
+| Socket 超时 / 连接断开 | 从当前文件偏移续传，计入同一重试计数（上限 10） | `Downloader.kt` `performDownload()` |
 | 版本不一致 | 弹出确认对话框，由用户决定是否继续 | `Downloader.kt` `onDownload()` |
 | CRC32 校验失败 | 终止流程，提示错误 | `Downloader.kt` `performDownload()` |
 | MD5 校验失败 | 终止流程，提示错误 | `Downloader.kt` `performDownload()` |
 | 解密失败 | 抛出异常，显示错误信息 | `Downloader.kt` `performDownload()` |
-| 用户取消下载 | 暂停 Ketch 任务，清理临时文件 | `DownloadView.kt` / `DownloadModel.kt` |
-| 下载失败（Ketch 内部重试用尽） | 最多重试 3 次，超出抛异常 | `FusClient.kt` `downloadFile()` |
+| 用户取消下载 | 清理临时文件（成功/取消路径） | `DownloadView.kt` / `DownloadModel.kt` |
+| 下载失败（重试用尽） | 保留已下载部分以便下次续传 | `DownloadModel.onEnd()` |

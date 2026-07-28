@@ -1,5 +1,3 @@
-@file:OptIn(DelicateCoroutinesApi::class)
-
 package tk.zwander.common.data.imei
 
 import androidx.compose.runtime.Composable
@@ -11,10 +9,10 @@ import de.halfbit.csv.CsvWithHeader
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -106,9 +104,10 @@ data object IMEIDatabase {
         "https://raw.githubusercontent.com/zacharee/SamloaderKotlin/master/common/src/commonMain/moko-resources/files/tacs.csv"
 
     val tacs = MutableStateFlow<Map<String, Set<String>>>(mapOf())
+    private val imeiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        GlobalScope.launch(Dispatchers.IO) {
+        imeiScope.launch {
             loadLocalCsv()
             try {
                 val response = globalHttpClient.get(LIVE_ENDPOINT)
@@ -146,7 +145,12 @@ data object IMEIDatabase {
     }
 
     private fun loadLocalCsv() {
-        loadCsv(MR.files.tacs_csv()!!.decodeToString())
+        val csvData = MR.files.tacs_csv()?.decodeToString()
+        if (csvData != null) {
+            loadCsv(csvData)
+        } else {
+            BifrostLogger.general.warn("loadLocalCsv: tacs_csv resource not found")
+        }
     }
 
     private fun loadCsv(csvString: String) {

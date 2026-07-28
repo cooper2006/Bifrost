@@ -90,8 +90,8 @@ object Request {
                 Ksoup.parse(response)
             } catch (e: Throwable) {
                 BifrostLogger.download.info("BinaryInform attempt ${index + 1} error: ${e.javaClass.simpleName}: ${e.message}")
+                BifrostLogger.download.debug("BinaryInform stacktrace", e)
                 latestError = e
-                e.printStackTrace()
                 return@forEachIndexed
             }
 
@@ -133,7 +133,7 @@ object Request {
         val logicCheck = try {
             getLogicCheck(fw, nonce)
         } catch (e: Throwable) {
-            e.printStackTrace()
+            BifrostLogger.download.warn("getLogicCheck failed: ${e.message}")
             ""
         }
         val split = fw.split("/")
@@ -442,7 +442,7 @@ object Request {
                     responseXml.extractV4Key()
                         ?: CryptUtils.getV4Key(fw, model, region, imeiSerial)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    BifrostLogger.download.warn("V4 key extraction failed: ${e.message}")
                     null
                 }?.let { V4Key(it.first, it.second) }
 
@@ -539,7 +539,12 @@ object Request {
                 val fwCpSuffix = getSuffix(fwCp)
 
                 val split = f.split("_")
-                val (version, versionSuffix) = split[dataIndex!!] to split.getOrNull(dataIndex + 1)
+                val (version, versionSuffix) = if (dataIndex != null && dataIndex < split.size) {
+                    split[dataIndex] to split.getOrNull(dataIndex + 1)
+                } else {
+                    BifrostLogger.download.warn("getBinaryFile: dataIndex=$dataIndex invalid for split size=${split.size}, using first element as version")
+                    split.getOrNull(0) to split.getOrNull(1)
+                }
 
                 val (servedCsc, cscSuffix) = cscFile?.split("_")
                     ?.takeIf { cscIndex != null }

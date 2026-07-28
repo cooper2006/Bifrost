@@ -37,8 +37,7 @@ class PatreonSupportersParser private constructor() {
 
             Json.decodeFromString(ListSerializer(SupporterInfo.serializer()), statement.bodyAsText())
         } catch (e: Exception) {
-            BifrostLogger.supporters.info("Failed to fetch or parse supporters: ${e.message}")
-            e.printStackTrace()
+            BifrostLogger.supporters.warn("Failed to fetch or parse supporters: ${e.message}", e)
             emptyList()
         }
     }

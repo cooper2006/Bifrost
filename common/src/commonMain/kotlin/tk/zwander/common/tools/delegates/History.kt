@@ -138,14 +138,13 @@ object History {
                             model.region.value
                         )
                     } catch (e: Exception) {
-                        BifrostLogger.general.warn("Error retrieving changelogs")
-                        e.printStackTrace()
+                        BifrostLogger.general.warn("Error retrieving changelogs", e)
                         null
                     }
                     model.historyItems.value = parsed.distinctBy { it.firmwareString }
                     model.endJob("")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    BifrostLogger.general.warn("History processing error: ${e.message}")
                     model.endJob(MR.strings.historyErrorFormat(e.message.toString()))
                 }
             }

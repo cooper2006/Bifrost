@@ -23,7 +23,7 @@ object ChangelogHandler {
             val outerResponse = try {
                 globalHttpClient.get(outerUrl)
             } catch (e: Exception) {
-                e.printStackTrace()
+                BifrostLogger.general.warn("Failed to fetch changelog outer URL", e)
                 return null
             }
 

@@ -54,6 +54,14 @@
 - **`EventManager` / `PatreonSupportersParser` 单例线程安全**：改用 `@Volatile` + `CommonLock` 双重检查锁定
 - **`History.kt` 字符串截取越界**：`substring(lastIndex - 3)` 添加长度检查，过短时返回原字符串
 - **`FetchResult.ignoredCodes` 可变数组**：`arrayOf` 改为 `setOf` 不可变集合
+- **`GlobalScope` 替换为 `CoroutineScope`**：`Settings.kt`、`IMEIGenerator.kt`、`CSCDB.kt` 中的 `GlobalScope.launch` 替换为 `CoroutineScope(SupervisorJob() + Dispatchers.IO)`，避免协程泄漏风险
+- **全代码库 `e.printStackTrace()` 替换为 `BifrostLogger`**：18 处 `printStackTrace` 全部替换为带异常参数的 `BifrostLogger.warn/error` 调用，覆盖 commonMain、jvmMain、iosMain、androidMain 及 desktop 入口
+- **`Downloader.kt` 非空断言修复**：`exception.message!!` 和 `info!!` 替换为空安全判断，避免 NPE 崩溃
+- **`VersionFetch.kt` 非空断言修复**：`BINARY_SEQUENCE` 的 `toInt()!!` 改为 `toIntOrNull() ?: 0`
+- **`FileManager.jvm.kt` 临时目录 NPE 修复**：`parentFile!!` 改为安全调用，无法获取时返回 null
+- **`UrlHandler.ios.kt` URL 空指针修复**：`NSURL.URLWithString(url)!!` 改为安全调用，无效 URL 时记录警告
+- **`IMEIGenerator.kt` 资源加载 NPE 修复**：`MR.files.tacs_csv()!!` 改为安全调用，资源缺失时记录警告
+- **`Request.kt` 索引越界保护**：`dataIndex!!` 改为空安全和越界判断，索引无效时自动降级到首元素
 
 ---
 

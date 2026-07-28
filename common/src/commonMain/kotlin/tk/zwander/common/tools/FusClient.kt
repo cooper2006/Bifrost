@@ -174,8 +174,7 @@ object FusClient : IFusClient<FusClient.Request> {
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                BifrostLogger.general.error("生成随机数时出错。")
-                e.printStackTrace()
+                BifrostLogger.general.error("生成随机数时出错。", e)
             }
         }
 

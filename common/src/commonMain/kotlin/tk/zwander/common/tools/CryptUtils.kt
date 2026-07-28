@@ -481,7 +481,7 @@ object CryptUtils {
                     updateFile.close()
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                BifrostLogger.crypt.warn("Failed to close MD5 update file", e)
             }
         }
     }

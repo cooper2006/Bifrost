@@ -4,10 +4,10 @@ import de.halfbit.csv.CsvWithHeader
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -17,7 +17,6 @@ import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.invoke
 import tk.zwander.samloaderkotlin.resources.MR
 
-@OptIn(DelicateCoroutinesApi::class)
 @Suppress("MemberVisibilityCanBePrivate", "unused")
 data object CSCDB {
     const val LIVE_ENDPOINT =
@@ -27,9 +26,10 @@ data object CSCDB {
     // https://tsar3000.com/list-of-samsung-csc-codes-samsung-firmware-csc-codes/
     private val _items = MutableStateFlow<Set<CSCItem>>(setOf())
     val items = _items.asStateFlow()
+    private val cscScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        GlobalScope.launch(Dispatchers.IO) {
+        cscScope.launch {
             loadLocalCsv()
             try {
                 val response = globalHttpClient.get(LIVE_ENDPOINT)

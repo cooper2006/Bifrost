@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
+import org.slf4j.LoggerFactory
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -82,7 +83,7 @@ fun main() {
 
     val exceptionHandlerFactory = WindowExceptionHandlerFactory { window ->
         WindowExceptionHandler { throwable ->
-            throwable.printStackTrace()
+            LoggerFactory.getLogger("BifrostMain").error("Unhandled window exception", throwable)
             SwingUtilities.invokeLater {
                 window.dispatchEvent(WindowEvent(window, WindowEvent.WINDOW_CLOSING))
 

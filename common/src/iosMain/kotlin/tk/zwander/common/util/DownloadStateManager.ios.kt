@@ -12,6 +12,7 @@ import tk.zwander.common.data.ChunkState
 import tk.zwander.common.data.DownloadStage
 import tk.zwander.common.data.DownloadState
 import kotlinx.cinterop.toKString
+import tk.zwander.common.util.BifrostLogger
 
 @OptIn(ExperimentalForeignApi::class)
 actual object DownloadStateManager {
@@ -75,7 +76,7 @@ actual object DownloadStateManager {
                 )
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            BifrostLogger.download.warn("Failed to load download state", e)
             null
         }
     }

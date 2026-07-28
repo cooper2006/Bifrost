@@ -11,6 +11,7 @@ import tk.zwander.common.data.ChunkState
 import tk.zwander.common.data.DownloadStage
 import tk.zwander.common.data.DownloadState
 import java.io.File
+import tk.zwander.common.util.BifrostLogger
 
 actual object DownloadStateManager {
     private val json = Json {
@@ -61,7 +62,7 @@ actual object DownloadStateManager {
                 )
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            BifrostLogger.download.warn("Failed to load download state", e)
             null
         }
     }

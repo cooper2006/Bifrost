@@ -49,7 +49,7 @@ object CrossPlatformBugsnag {
     }
 
     fun notify(e: Throwable) {
-        e.printStackTrace()
+        BifrostLogger.general.warn("Unhandled exception: ${e.message}", e)
 
         if (e.shouldIgnore()) {
             return

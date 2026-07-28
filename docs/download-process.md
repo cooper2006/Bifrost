@@ -2,7 +2,7 @@
 
 本文档详细介绍点击"下载"按钮后，Bifrost 从三星服务器获取固件的完整技术流程。涵盖代码层面与实际运行时行为。
 
-> **文档版本：** v2.1.3+（Ktor 流式下载、断点续传、连接超时重试、失败保留临时文件、专用异常类型、统一日志输出）
+> **文档版本：** v2.1.3+（Ktor 流式下载、断点续传、连接超时重试、失败保留临时文件、专用异常类型、统一日志输出、GlobalScope 消除、NPE 防御性修复）
 
 ---
 
@@ -181,9 +181,16 @@ User-Agent: SMART 2.0
 ```kotlin
 confirmCallback.onError(
     info = DownloadErrorInfo(
-        message = exception.message!!,   // VersionException 的 message 始终非空
+        message = exception.message ?: "Unknown error",   // 安全调用，防止 message 为 null
         callback = DownloadErrorConfirmCallback(
-            onAccept = { performDownload(info!!, model) },
+            onAccept = {
+                if (info != null) {
+                    performDownload(info, model)   // 安全检查，info 可能为 null
+                } else {
+                    model.endJob("")
+                    eventManager.sendEvent(Event.Download.Finish)
+                }
+            },
             onCancel = { model.endJob(""); eventManager.sendEvent(Event.Download.Finish) },
         ),
     ),
@@ -732,11 +739,20 @@ sequenceDiagram
 | `EventManager` / `PatreonSupportersParser` 单例线程不安全 | 改用 `@Volatile` + `CommonLock` 双重检查锁定 | v2.1.3+ |
 | `History.kt` 字符串截取越界 | 添加长度检查，过短时返回原字符串 | v2.1.3+ |
 | `FetchResult.ignoredCodes` 可变数组 | 改为 `setOf` 不可变集合 | v2.1.3+ |
+| `GlobalScope` 协程泄漏 | `Settings.kt`、`IMEIGenerator.kt`、`CSCDB.kt` 中 `GlobalScope.launch` 替换为 `CoroutineScope(SupervisorJob() + Dispatchers.IO)` | v2.1.3+ |
+| 全代码库 `e.printStackTrace()` | 18 处全部替换为 `BifrostLogger.warn/error`（SLF4J）带异常参数的日志调用 | v2.1.3+ |
+| `Downloader.kt` 非空断言 NPE | `exception.message!!` 和 `info!!` 替换为空安全判断 | v2.1.3+ |
+| `VersionFetch.kt` 非空断言 NPE | `BINARY_SEQUENCE.toInt()!!` 改为 `toIntOrNull() ?: 0` | v2.1.3+ |
+| `FileManager.jvm.kt` 临时目录 NPE | `parentFile!!` 改为安全调用，失败返回 null | v2.1.3+ |
+| `UrlHandler.ios.kt` URL 空指针 | `NSURL.URLWithString(url)!!` 改为安全调用 + 日志警告 | v2.1.3+ |
+| `IMEIGenerator.kt` 资源加载 NPE | `MR.files.tacs_csv()!!` 改为安全调用 + 日志警告 | v2.1.3+ |
+| `Request.kt` 索引越界 | `dataIndex!!` 改为空安全 + 越界判断，无效时降级到首元素 | v2.1.3+ |
 
 ## 代码变更记录
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| (当前) | 2026-07-28 | 第四轮代码审查：GlobalScope 消除（3 文件）、e.printStackTrace() 全替换（18 处）、!! NPE 防御性修复（7 处） |
 | (当前) | 2026-07-28 | 统一日志输出：全代码库 println 替换为 BifrostLogger（SLF4J）模块分级日志 |
 | (当前) | 2026-07-28 | 第三轮代码审查修复：V4Key 数据类、流泄漏、单例线程安全、字符串越界、可变数组等 15 项修复 |
 | (当前) | 2026-07-28 | 第二轮代码审查修复：FusClientLegacy 无限递归、异常类型专用化、ParallelDownloader 弃用、Decrypter NPE 等 |
@@ -753,18 +769,18 @@ sequenceDiagram
 
 ### P2 - 代码健壮性
 
-2. **`exception.message!!` → `exception.message ?: ""`** — 防御性编程，防止未来异常层级变更
-3. **文件名长度截断** — 对 `fullFileName` 增加长度校验，超出时截断版本号部分
-4. **接入 ParallelDownloader（可选）** — 启用分块并行下载前需验证多连接对 FUS auth 的并发影响，建议在 `authProvider` 中复用单次 nonce 刷新而非每分块独立刷新
+2. **文件名长度截断** — 对 `fullFileName` 增加长度校验，超出时截断版本号部分
+3. **接入 ParallelDownloader（可选）** — 启用分块并行下载前需验证多连接对 FUS auth 的并发影响，建议在 `authProvider` 中复用单次 nonce 刷新而非每分块独立刷新
 
 ### P3 - 性能与架构
 
-5. **暂停 busy-wait 改为挂起式**
+4. **暂停 busy-wait 改为挂起式**
    ```kotlin
    // 用 StateFlow.first {} 挂起，避免每 100ms 轮询
    model.isPaused.first { !it }
    ```
-6. **协程作用域管理** — `CoroutineScope(currentCoroutineContext()).launch()` 改用 `supervisorScope { launch { ... } }`
+
+> **已完成：** `GlobalScope` 已全部替换为 `CoroutineScope(SupervisorJob() + Dispatchers.IO)`，不再有全局协程泄漏风险。
 
 ## 错误处理对照
 

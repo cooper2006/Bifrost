@@ -8,11 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.russhwolf.settings.ObservableSettings
 import com.russhwolf.settings.SettingsListener
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -70,7 +70,9 @@ sealed class SettingsKey<Type> {
 
     protected abstract fun registerListener(callback: (Type?) -> Unit): SettingsListener
 
-    @OptIn(DelicateCoroutinesApi::class, ExperimentalForInheritanceCoroutinesApi::class)
+    private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
     fun asMutableStateFlow(): MutableStateFlow<Type> {
         val wrappedFlow = MutableStateFlow(getValue())
         val flow = object : MutableStateFlow<Type> by wrappedFlow {
@@ -78,14 +80,14 @@ sealed class SettingsKey<Type> {
                 get() = wrappedFlow.value
                 set(value) {
                     wrappedFlow.value = value
-                    GlobalScope.launch(Dispatchers.IO) {
+                    settingsScope.launch {
                         setValue(value)
                     }
                 }
 
             override suspend fun emit(value: Type) {
                 wrappedFlow.emit(value)
-                GlobalScope.launch(Dispatchers.IO) {
+                settingsScope.launch {
                     setValue(value)
                 }
             }
@@ -93,7 +95,7 @@ sealed class SettingsKey<Type> {
             override fun tryEmit(value: Type): kotlin.Boolean {
                 return wrappedFlow.tryEmit(value).also {
                     if (it) {
-                        GlobalScope.launch(Dispatchers.IO) {
+                        settingsScope.launch {
                             setValue(value)
                         }
                     }

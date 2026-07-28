@@ -12,6 +12,7 @@ import java.io.File
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
 import javax.swing.filechooser.FileSystemView
+import tk.zwander.common.util.BifrostLogger
 
 actual object FileManager {
     actual suspend fun pickFile(): IPlatformFile? {
@@ -45,6 +46,14 @@ actual object FileManager {
     }
 
     actual suspend fun getTempDirectory(): IPlatformFile? {
-        return PlatformFile(File.createTempFile("bifrost", "tmp").parentFile!!)
+        val tempFile = File.createTempFile("bifrost", "tmp")
+        val parentDir = tempFile.parentFile
+        tempFile.delete()
+        return if (parentDir != null) {
+            PlatformFile(parentDir)
+        } else {
+            BifrostLogger.general.warn("getTempDirectory: unable to determine temp directory parent")
+            null
+        }
     }
 }

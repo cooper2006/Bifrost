@@ -122,7 +122,7 @@ object VersionFetch {
         return allInfos.map { info ->
             SmartBinaryInfo(
                 index = info.firstDataElementDataByTagName("BINARY_INDEX")?.toIntOrNull(),
-                sequence = info.firstDataElementDataByTagName("BINARY_SEQUENCE")?.toInt()!!,
+                sequence = info.firstDataElementDataByTagName("BINARY_SEQUENCE")?.toIntOrNull() ?: 0,
                 modelName = info.firstDataElementDataByTagName("BINARY_MODEL_NAME") ?: "",
                 displayName = info.firstDataElementDataByTagName("BINARY_MODEL_DISPLAYNAME"),
                 swVersion = info.firstDataElementDataByTagName("BINARY_SW_VERSION") ?: "",

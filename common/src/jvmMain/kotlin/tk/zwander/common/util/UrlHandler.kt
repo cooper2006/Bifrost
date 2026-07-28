@@ -5,6 +5,7 @@ import java.io.IOException
 import java.lang.StringBuilder
 import java.net.URI
 import java.net.URLEncoder
+import tk.zwander.common.util.BifrostLogger
 
 actual object UrlHandler {
     private val desktop = Desktop.getDesktop()
@@ -15,9 +16,9 @@ actual object UrlHandler {
         try {
             desktop.browse(uri)
         } catch (e: IOException) {
-            e.printStackTrace()
+            BifrostLogger.general.warn("Failed to open URL: ${url}", e)
         } catch (e: UnsupportedOperationException) {
-            e.printStackTrace()
+            BifrostLogger.general.warn("Desktop browse not supported for URL: ${url}", e)
         }
     }
     actual fun sendEmail(address: String, subject: String?, content: String?) {
@@ -33,9 +34,9 @@ actual object UrlHandler {
         try {
             desktop.mail(uri)
         } catch (e: IOException) {
-            e.printStackTrace()
+            BifrostLogger.general.warn("Failed to send email to: ${address}", e)
         } catch (e: UnsupportedOperationException) {
-            e.printStackTrace()
+            BifrostLogger.general.warn("Desktop mail not supported for: ${address}", e)
         }
     }
 }

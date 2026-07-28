@@ -60,13 +60,20 @@ object Downloader {
             model = model.model.value,
             region = model.region.value,
             onVersionException = { exception, info ->
-                BifrostLogger.download.info("onDownload version exception: ${exception.message}")
+                val errorMsg = exception.message ?: "Unknown error"
+                BifrostLogger.download.info("onDownload version exception: $errorMsg")
                 confirmCallback.onError(
                     info = DownloadErrorInfo(
-                        message = exception.message!!,
+                        message = errorMsg,
                         callback = DownloadErrorConfirmCallback(
                             onAccept = {
-                                performDownload(info!!, model)
+                                if (info != null) {
+                                    performDownload(info, model)
+                                } else {
+                                    BifrostLogger.download.info("onDownload: info is null after version exception, aborting")
+                                    model.endJob("")
+                                    eventManager.sendEvent(Event.Download.Finish)
+                                }
                             },
                             onCancel = {
                                 model.endJob("")

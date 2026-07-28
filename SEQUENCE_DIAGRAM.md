@@ -1,7 +1,7 @@
 # 下载流程时序图
 
 ```
-UI (DownloadView)        DownloadModel        Downloader           Request           FusClient           Ketch/HTTP        FileManager        CryptUtils
+UI (DownloadView)        DownloadModel        Downloader           Request           FusClient           Ktor Streaming      FileManager        CryptUtils
      |                       |                      |                   |                  |                    |                  |                    |
      |-- Download Click ---->|                     |                   |                  |                    |                  |                    |
      |                       |-- launchJob -------->|                   |                  |                    |                  |                    |
@@ -15,36 +15,45 @@ UI (DownloadView)        DownloadModel        Downloader           Request      
      |                       |                      |<-- BinaryFileInfo |                  |                    |                  |                    |
      |                       |                      |                   |                  |                    |                  |                    |
      |                       |                      |-- performDownload |                  |                    |                  |                    |
-     |                       |                      |                   |                  |                    |                  |                    |
+     |                       |                      |  (loop 0-10x)     |                  |                    |                  |                    |
+     |                       |                      |                   |                  |-- refreshNonce()   |                  |                    |
      |                       |                      |                   |                  |-- makeReq(BINARY_INIT)->|             |                    |
      |                       |                      |                   |                  |<-- 200 OK ----------|                  |                    |
-     |                       |                      |                   |                  |                    |                  |                    |
-     |                       |                      |                   |                  |-- downloadFile() -->|                  |                    |
-     |                       |                      |                   |                  |                    |-- split into 4 chunks |                    |
-     |                       |                      |                   |                  |                    |-- GET Range:0-XXXXX--->|                    |
-     |                       |                      |                   |                  |                    |-- GET Range:XXXX-XXXX->|                    |
-     |                       |                      |                   |                  |                    |-- ... 2 more parallel requests              |
-     |                       |                      |                   |                  |                    |<-- 206 Partial Content (4x)  |
-     |                       |                      |                   |                  |                    |-- write to chunk temp files     |
-     |                       |                      |                   |                  |                    |<-- progress callbacks --------|
-     |                       |                      |                   |                  |                    |-- concatenate chunks ----->|
-     |                       |                      |                   |                  |                    |<-- encFile written --------|
      |                       |                      |                   |                  |                    |                    |                    |
-     |                       |                      |                   |                  |                    |                    |-- check CRC32 ----->|
+     |                       |                      |                   |                  |-- downloadFile() -->|                    |                    |
+     |                       |                      |                   |                  |  (start=已下载偏移)  |                    |                    |
+     |                       |                      |                   |                  |                    |-- GET Range:start- --->|
+     |                       |                      |                   |                  |                    |   (64KB buffer loop)  |
+     |                       |                      |                   |                  |                    |<-- 206 Partial Content -|
+     |                       |                      |                   |                  |                    |-- write to encFile --->|
+     |                       |                      |                   |                  |                    |<-- progress callback -|
+     |                       |                      |                   |                  |  (每500ms节流)      |                    |
+     |                       |                      |                   |                  |  (每5秒日志进度)     |                    |
+     |                       |                      |                   |                  |                    |                    |                    |
+     |                       |                      |  alt 401          |                  |                    |                    |                    |
+     |                       |                      |    onAuthRefresh( )|                 |                    |                    |                    |
+     |                       |                      |    refreshNonce()  |                  |                    |                    |                    |
+     |                       |                      |    makeReq(BINARY_INIT)              |                    |                    |                    |
+     |                       |                      |    continue (续传) |                  |                    |                    |                    |
+     |                       |                      |                   |                  |                    |                    |                    |
+     |                       |                      |-- CRC32 check ---->|                  |                    |                    |                    |
+     |                       |                      |                   |                  |                    |                    |-- CRC32 --------->|
      |                       |                      |                   |                  |                    |                    |<-- CRC OK --------------|
      |                       |                      |                   |                  |                    |                    |                    |
-     |                       |                      |                   |                  |                    |                    |-- check MD5 --------->|
+     |                       |                      |-- MD5 check (if md5 available)                                       |                    |
+     |                       |                      |                   |                  |                    |                    |-- MD5 ----------->|
      |                       |                      |                   |                  |                    |                    |<-- MD5 OK ---------------|
      |                       |                      |                   |                  |                    |                    |                    |
-     |                       |                      |                   |                  |                    |                    |-- decrypt --------->|
+     |                       |                      |-- decrypt -------->|                  |                    |                    |                    |
+     |                       |                      |                   |                  |                    |                    |-- decrypt ------->|
      |                       |                      |                   |                  |                    |                    |<-- decFile written ------|
      |                       |                      |                   |                  |                    |                    |                    |
-     |                       |                      |                   |                  |                    |                    |-- auto-delete enc? --->|
-     |                       |                      |                   |                  |                    |                    |<-- cleanup --------------|
-     |                       |                      |<-- done() --------|                  |                    |                  |                    |
+     |                       |                      |-- auto-delete enc?|                  |                    |                    |                    |
+     |                       |                      |                   |                  |                    |                    |-- cleanup -------->|
+     |                       |                      |                   |                  |                    |                    |<-- done ---------------|
+     |                       |                      |<-- endJobSuccess -|                  |                    |                  |                    |
      |<-- Progress Update ---|<-- progress.value ---|                   |                  |                    |                  |                    |
      |<-- Status Update -----|<-- statusText.value -|                   |                  |                    |                  |                    |
-     |                       |                      |-- endJob -------->|                   |                    |                  |                    |
      |                       |                      |                   |                  |                    |                  |                    |
 ```
 
@@ -54,9 +63,10 @@ UI (DownloadView)        DownloadModel        Downloader           Request      
 |------|------|
 | 1. BinaryFileInfo 获取 | 通过 BINARY_INFORM 请求获取固件信息（文件名、大小、CRC32、v4Key） |
 | 2. BINARY_INIT 认证 | 向 FUS 服务器发起初始化认证，获取 session |
-| 3. 分块下载 | 将文件按 4 路分片，每片独立 Range 请求，并行下载到临时文件。大文件自动分块（50MB-4GB），支持断点续传 |
-| 4. CRC32 校验 | 解密前校验加密文件的 CRC32 |
-| 5. MD5 校验 | 校验文件 Content-MD5（来自 HTTP 头） |
-| 6. 文件复制 | 如果 tempDirectory != downloadDirectory，复制到目标目录 |
-| 7. 解密 | 使用 v4Key 对加密文件进行 AES 解密 |
-| 8. 清理 | 可选自动删除加密文件 |
+| 3. Ktor 单线程流式下载 | 移除 Ketch 后改用 Ktor 直接流式下载，64KB buffer 循环读取，支持 HTTP Range 断点续传。每 500ms 回调进度，每 5 秒日志记录 |
+| 4. 401/超时/断连自动重试 | downloadFile 内置 onAuthRefresh 回调，收到 401 后刷新 nonce 并重新 BinaryInit；外层 performDownload 循环最多重试 10 次 |
+| 5. CRC32 校验 | 解密前校验加密文件的 CRC32 |
+| 6. MD5 校验 | 校验文件 Content-MD5（来自 downloadFile 返回值） |
+| 7. 文件复制 | 如果 tempDirectory != downloadDirectory，复制到目标目录 |
+| 8. 解密 | 使用 v4Key 对加密文件进行 AES 解密 |
+| 9. 清理 | 可选自动删除加密文件 |

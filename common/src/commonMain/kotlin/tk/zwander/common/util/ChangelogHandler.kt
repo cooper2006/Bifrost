@@ -8,6 +8,7 @@ import io.ktor.http.*
 import io.ktor.utils.io.charsets.MalformedInputException
 import tk.zwander.common.data.changelog.Changelog
 import tk.zwander.common.data.changelog.Changelogs
+import tk.zwander.common.util.BifrostLogger
 
 object ChangelogHandler {
     private const val DOMAIN_URL = "https://doc.samsungmobile.com:443"
@@ -30,7 +31,7 @@ object ChangelogHandler {
                 parseDocUrl(outerResponse.bodyAsText())
                     ?.replace("../../", "$DOMAIN_URL/")
             } else {
-                println("No changelogs found for $device $region")
+                BifrostLogger.general.info("No changelogs found for $device $region")
                 return null
             }
 
@@ -41,7 +42,7 @@ object ChangelogHandler {
                     iframeResponse.bodyAsText()
                 ))
             } else {
-                println("Unable to load changelogs for $device $region")
+                BifrostLogger.general.warn("Unable to load changelogs for $device $region")
                 null
             }
         } catch (e: Throwable) {

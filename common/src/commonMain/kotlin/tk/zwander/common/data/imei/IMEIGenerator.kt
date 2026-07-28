@@ -18,6 +18,7 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.invoke
 import tk.zwander.samloaderkotlin.resources.MR
@@ -121,7 +122,7 @@ data object IMEIDatabase {
                     loadCsv(liveData)
                 }
             } catch (e: Throwable) {
-                println("Failed to fetch remote TAC list, using local resource instead. ${e.message}")
+                BifrostLogger.general.warn("Failed to fetch remote TAC list, using local resource instead. ${e.message}")
             }
         }
     }

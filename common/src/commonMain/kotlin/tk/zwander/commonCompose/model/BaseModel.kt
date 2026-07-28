@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import tk.zwander.common.util.BifrostSettings
+import tk.zwander.common.util.CommonLock
 import tk.zwander.common.util.SettingsKey
 
 /**
@@ -62,6 +63,7 @@ abstract class BaseModel(
     val progress = MutableStateFlow(0L to 0L)
 
     private val _jobs = MutableStateFlow(listOf<Job>())
+    private val _jobsLock = CommonLock()
 
     val hasRunningJobs: Flow<Boolean>
         get() = _jobs.map { it.any { j -> j.isActive } }
@@ -79,11 +81,16 @@ abstract class BaseModel(
      * @param text the text to show in the status message.
      */
     fun endJob(text: String) {
-        _jobs.value.forEach {
+        val currentJobs = _jobsLock.withLock {
+            val jobs = _jobs.value
+            _jobs.value = listOf()
+            jobs
+        }
+
+        currentJobs.forEach {
             it.cancelChildren()
             it.cancel()
         }
-        _jobs.value = listOf()
 
         progress.value = 0L to 0L
         speed.value = 0L
@@ -94,7 +101,9 @@ abstract class BaseModel(
 
     fun launchJob(block: suspend CoroutineScope.() -> Unit): Job {
         val job = scope.launch(block = block)
-        _jobs.value += job
+        _jobsLock.withLock {
+            _jobs.value = _jobs.value + job
+        }
         return job
     }
 

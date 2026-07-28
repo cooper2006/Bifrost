@@ -1,5 +1,6 @@
 package tk.zwander.common.tools
 
+import tk.zwander.common.util.BifrostLogger
 import dev.zwander.kotlin.file.IPlatformFile
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
@@ -94,8 +95,8 @@ object ParallelDownloader {
         val connections = calculateConnections(size)
         val totalChunks = ((size - start) + chunkSize - 1) / chunkSize
 
-        println("[BifrostDownload] Parallel start: size=${size}bytes (${size / (1024 * 1024)}MB), chunkSize=${chunkSize / (1024 * 1024)}MB, connections=$connections, totalChunks=$totalChunks, dest=${dest.getAbsolutePath()}")
-        println("[BifrostDownload] Parallel url=$url")
+        BifrostLogger.download.info("Parallel start: size=${size}bytes (${size / (1024 * 1024)}MB), chunkSize=${chunkSize / (1024 * 1024)}MB, connections=$connections, totalChunks=$totalChunks, dest=${dest.getAbsolutePath()}")
+        BifrostLogger.download.info("Parallel url=$url")
 
         val downloadedBytes = MutableStateFlow(start)
         val destPath = dest.getAbsolutePath()
@@ -142,19 +143,19 @@ object ParallelDownloader {
 
             val chunkSizes = chunkJobs.awaitAll()
             val totalDownloaded = chunkSizes.sum()
-            println("[BifrostDownload] Parallel done: totalDownloaded=${totalDownloaded}bytes (${totalDownloaded / (1024 * 1024)}MB), expected=$size")
+            BifrostLogger.download.info("Parallel done: totalDownloaded=${totalDownloaded}bytes (${totalDownloaded / (1024 * 1024)}MB), expected=$size")
 
             return null
         } catch (e: CancellationException) {
-            println("[BifrostDownload] Parallel cancelled")
+            BifrostLogger.download.info("Parallel cancelled")
             throw e
         } catch (e: Exception) {
-            println("[BifrostDownload] Parallel failed: ${e.javaClass.simpleName}: ${e.message}")
+            BifrostLogger.download.info("Parallel failed: ${e.javaClass.simpleName}: ${e.message}")
             throw e
         } finally {
             fileChannel.close()
             raf.close()
-            println("[BifrostDownload] Parallel: file channels closed")
+            BifrostLogger.download.info("Parallel: file channels closed")
         }
     }
 
@@ -188,9 +189,9 @@ object ParallelDownloader {
             val authV = currentAuth.value
 
             if (attempt == 1) {
-                println("[BifrostDownload] Chunk $chunkIndex start: range=$start-$end (${expectedBytes / 1024}KB)")
+                BifrostLogger.download.info("Chunk $chunkIndex start: range=$start-$end (${expectedBytes / 1024}KB)")
             } else {
-                println("[BifrostDownload] Chunk $chunkIndex retry $attempt/$MAX_AUTH_RETRIES")
+                BifrostLogger.download.info("Chunk $chunkIndex retry $attempt/$MAX_AUTH_RETRIES")
             }
 
             try {
@@ -206,7 +207,7 @@ object ParallelDownloader {
                         connectTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
                     }
                 }.execute { response ->
-                    println("[BifrostDownload] Chunk $chunkIndex response status=${response.status.value}")
+                    BifrostLogger.download.info("Chunk $chunkIndex response status=${response.status.value}")
 
                     if (response.status.value == 401) {
                         throw AuthExpiredException()
@@ -241,7 +242,7 @@ object ParallelDownloader {
 
                         // 每5秒打印一次分块进度
                         if (now - lastLogTime > 5000) {
-                            println("[BifrostDownload] Chunk $chunkIndex progress: ${bytesDownloaded / 1024}KB / ${expectedBytes / 1024}KB, bps=${bps / 1024}KB/s")
+                            BifrostLogger.download.info("Chunk $chunkIndex progress: ${bytesDownloaded / 1024}KB / ${expectedBytes / 1024}KB, bps=${bps / 1024}KB/s")
                             lastLogTime = now
                         }
 
@@ -257,7 +258,7 @@ object ParallelDownloader {
                 progressCallback(downloadedBytes.value, totalBytes, 0L)
 
                 val elapsedTotal = (System.currentTimeMillis() - startTime) / 1000.0
-                println("[BifrostDownload] Chunk $chunkIndex done: ${bytesDownloaded / 1024}KB in ${String.format("%.1f", elapsedTotal)}s")
+                BifrostLogger.download.info("Chunk $chunkIndex done: ${bytesDownloaded / 1024}KB in ${String.format("%.1f", elapsedTotal)}s")
                 return bytesDownloaded
 
             } catch (e: AuthExpiredException) {
@@ -267,17 +268,17 @@ object ParallelDownloader {
                 }
 
                 if (attempt < MAX_AUTH_RETRIES) {
-                    println("[BifrostDownload] Chunk $chunkIndex got 401, refreshing auth (attempt ${attempt + 1}/$MAX_AUTH_RETRIES)")
+                    BifrostLogger.download.info("Chunk $chunkIndex got 401, refreshing auth (attempt ${attempt + 1}/$MAX_AUTH_RETRIES)")
                     refreshAuthSafely(authMutex, authProvider, currentAuth, authV)
                     continue
                 }
-                println("[BifrostDownload] Chunk $chunkIndex: auth retries exhausted")
+                BifrostLogger.download.info("Chunk $chunkIndex: auth retries exhausted")
                 throw RuntimeException("分块 $chunkIndex 授权过期，重试 $MAX_AUTH_RETRIES 次后仍失败")
 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                println("[BifrostDownload] Chunk $chunkIndex failed: ${e.javaClass.simpleName}: ${e.message}")
+                BifrostLogger.download.info("Chunk $chunkIndex failed: ${e.javaClass.simpleName}: ${e.message}")
                 throw e
             }
         }
@@ -298,12 +299,12 @@ object ParallelDownloader {
     ) {
         authMutex.withLock {
             if (currentAuth.value != staleAuth) {
-                println("[BifrostDownload] Auth already refreshed by another chunk, skipping")
+                BifrostLogger.download.info("Auth already refreshed by another chunk, skipping")
                 return@withLock
             }
             val newAuth = authProvider()
             currentAuth.value = newAuth
-            println("[BifrostDownload] Auth refreshed: ${staleAuth.take(20)}... -> ${newAuth.take(20)}...")
+            BifrostLogger.download.info("Auth refreshed: ${staleAuth.take(20)}... -> ${newAuth.take(20)}...")
         }
     }
 }

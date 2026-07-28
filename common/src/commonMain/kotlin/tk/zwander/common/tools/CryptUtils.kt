@@ -1,5 +1,6 @@
 package tk.zwander.common.tools
 
+import tk.zwander.common.util.BifrostLogger
 import com.fleeksoft.io.ByteBufferFactory
 import com.fleeksoft.io.getInt
 import dev.whyoleg.cryptography.CryptographyProvider
@@ -56,10 +57,18 @@ object CryptUtils {
          */
         private fun unpad(d: ByteArray): ByteArray {
             val lastElement = d.last()
+            val padLength = if (lastElement >= 0) lastElement.toInt() else -lastElement.toInt()
+
+            // AES 块大小为 16，合法填充值应在 1-16 范围内
+            if (padLength <= 0 || padLength > 16 || padLength > d.size) {
+                BifrostLogger.crypt.info("Legacy.unpad: invalid padding length $padLength (data size=${d.size}), returning original data")
+                return d
+            }
+
             return if (lastElement >= 0) {
-                d.dropLast(lastElement.toInt()).toByteArray()
+                d.dropLast(padLength).toByteArray()
             } else {
-                d.take(-lastElement).toByteArray()
+                d.take(padLength).toByteArray()
             }
         }
 
@@ -145,7 +154,8 @@ object CryptUtils {
         }
 
         /**
-        @@ -139,10 +163,8 @@ object CryptUtils {
+         * Decrypt a provided nonce string.
+         * @param input the nonce to decrypt.
          * @return the decrypted nonce.
          */
         @OptIn(ExperimentalEncodingApi::class)
@@ -444,7 +454,6 @@ object CryptUtils {
 
         val calculatedDigest = calculateMD5(updateFile) ?: return false
         return calculatedDigest.equals(md5, ignoreCase = true)
-            .also { updateFile.close() }
     }
 
     /**

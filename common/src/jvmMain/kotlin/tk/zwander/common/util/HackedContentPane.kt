@@ -1,5 +1,6 @@
 package tk.zwander.common.util
 
+import tk.zwander.common.util.BifrostLogger
 import java.awt.AlphaComposite
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -7,7 +8,7 @@ import javax.swing.JPanel
 
 internal class HackedContentPane : JPanel() {
     override fun paint(g: Graphics) {
-        println("alpha ${background.alpha}")
+        BifrostLogger.general.debug("alpha ${background.alpha}")
         if (background.alpha != 255) {
             val gg = g.create()
 

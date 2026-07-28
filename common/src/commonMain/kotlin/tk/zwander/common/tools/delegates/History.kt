@@ -5,6 +5,7 @@ import kotlinx.datetime.format.DateTimeComponents
 import kotlinx.datetime.format.char
 import tk.zwander.common.data.HistoryInfo
 import tk.zwander.common.tools.VersionFetch
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.ChangelogHandler
 import tk.zwander.common.util.CrossPlatformBugsnag
 import tk.zwander.common.util.firstElementByTagName
@@ -80,7 +81,7 @@ object History {
                     }
                 }.sortedByDescending {
                     it.firmwareString.let { f ->
-                        f.substring(f.lastIndex - 3)
+                        if (f.length >= 4) f.substring(f.length - 4) else f
                     }
                 }
             )
@@ -137,7 +138,7 @@ object History {
                             model.region.value
                         )
                     } catch (e: Exception) {
-                        println("Error retrieving changelogs")
+                        BifrostLogger.general.warn("Error retrieving changelogs")
                         e.printStackTrace()
                         null
                     }

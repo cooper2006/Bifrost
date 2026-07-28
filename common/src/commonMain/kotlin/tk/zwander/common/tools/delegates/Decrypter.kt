@@ -1,5 +1,6 @@
 package tk.zwander.common.tools.delegates
 
+import tk.zwander.common.util.BifrostLogger
 import io.ktor.utils.io.core.toByteArray
 import tk.zwander.common.data.DecryptFileInfo
 import tk.zwander.common.tools.CryptUtils
@@ -14,7 +15,12 @@ import tk.zwander.samloaderkotlin.resources.MR
 object Decrypter {
     suspend fun onDecrypt(model: DecryptModel) {
         eventManager.sendEvent(Event.Decrypt.Start)
-        val info = model.fileToDecrypt.value!!
+        val info = model.fileToDecrypt.value ?: run {
+            BifrostLogger.decrypt.info("onDecrypt: no file selected, aborting")
+            model.endJob(MR.strings.selectEncrypted())
+            eventManager.sendEvent(Event.Decrypt.Finish)
+            return
+        }
         val inputFile = info.encFile
         val outputFile = info.decFile
         val decKey = model.decryptionKey.value
@@ -54,12 +60,17 @@ object Decrypter {
                         )
 
                         if (binaryFileInfo != null) {
-                            binaryFileInfo.v4Key?.first!!
+                            binaryFileInfo.v4Key?.keyBytes ?: run {
+                                BifrostLogger.decrypt.info("onDecrypt: v4Key missing from binary info")
+                                model.endJob(MR.strings.decryptError("无法获取解密密钥，请检查型号和区域是否正确。"))
+                                eventManager.sendEvent(Event.Decrypt.Finish)
+                                return
+                            }
                         } else {
                             return
                         }
                     } catch (e: Throwable) {
-                        println("Unable to retrieve v4 key ${e.message}.")
+                        BifrostLogger.decrypt.error("Unable to retrieve v4 key ${e.message}.")
                         model.endJob(MR.strings.decryptError(e.message.toString()))
                         return
                     }
@@ -69,7 +80,7 @@ object Decrypter {
             val inputStream = try {
                 inputFile.openInputStream() ?: return
             } catch (e: Throwable) {
-                println("Unable to open input file ${e.message}.")
+                BifrostLogger.decrypt.error("Unable to open input file ${e.message}.")
                 model.endJob(MR.strings.decryptError(e.message.toString()))
                 return
             }
@@ -77,7 +88,7 @@ object Decrypter {
             val outputStream = try {
                 outputFile.openOutputStream() ?: return
             } catch (e: Throwable) {
-                println("Unable to open output file ${e.message}.")
+                BifrostLogger.decrypt.error("Unable to open output file ${e.message}.")
                 model.endJob(MR.strings.decryptError(e.message.toString()))
                 return
             }

@@ -1,5 +1,6 @@
 package tk.zwander.common.tools.delegates
 
+import tk.zwander.common.util.BifrostLogger
 import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +51,7 @@ object Downloader {
         model: DownloadModel,
         confirmCallback: DownloadErrorCallback,
     ) {
-        println("[BifrostDownload] onDownload start: model=${model.model.value}, fw=${model.fw.value}, region=${model.region.value}")
+        BifrostLogger.download.info("onDownload start: model=${model.model.value}, fw=${model.fw.value}, region=${model.region.value}")
         eventManager.sendEvent(Event.Download.Start)
         model.statusText.value = MR.strings.downloading()
 
@@ -59,7 +60,7 @@ object Downloader {
             model = model.model.value,
             region = model.region.value,
             onVersionException = { exception, info ->
-                println("[BifrostDownload] onDownload version exception: ${exception.message}")
+                BifrostLogger.download.info("onDownload version exception: ${exception.message}")
                 confirmCallback.onError(
                     info = DownloadErrorInfo(
                         message = exception.message!!,
@@ -76,7 +77,7 @@ object Downloader {
                 )
             },
             onErrorFinish = { text ->
-                println("[BifrostDownload] onDownload retrieveBinaryFileInfo onErrorFinish: ${text.take(80)}")
+                BifrostLogger.download.info("onDownload retrieveBinaryFileInfo onErrorFinish: ${text.take(80)}")
                 model.endJob(text)
                 eventManager.sendEvent(Event.Download.Finish)
             },
@@ -88,23 +89,23 @@ object Downloader {
         )
 
         if (info != null) {
-            println("[BifrostDownload] onDownload: retrieved file info, fileName=${info.fileName}, size=${info.size}")
+            BifrostLogger.download.info("onDownload: retrieved file info, fileName=${info.fileName}, size=${info.size}")
             performDownload(info, model)
         } else {
-            println("[BifrostDownload] onDownload: no file info returned")
+            BifrostLogger.download.info("onDownload: no file info returned")
         }
     }
 
     @OptIn(ExperimentalTime::class)
     private suspend fun performDownload(info: BinaryFileInfo, model: DownloadModel) {
         val (path, fileName, size, crc32, v4Key, fwVer, modelType) = info
-        println("[BifrostDownload] performDownload start: path=$path, fileName=$fileName, size=${size}bytes, crc32=$crc32, hasV4Key=${v4Key != null}, fwVer=$fwVer, modelType=$modelType")
+        BifrostLogger.download.info("performDownload start: path=$path, fileName=$fileName, size=${size}bytes, crc32=$crc32, hasV4Key=${v4Key != null}, fwVer=$fwVer, modelType=$modelType")
 
         val fullFileName = fileName.replace(
             ".zip",
             "_${model.fw.value.replace("/", "_")}_${model.region.value}.zip",
         ).substringAfterLast("/")
-        println("[BifrostDownload] performDownload: fullFileName=$fullFileName")
+        BifrostLogger.download.info("performDownload: fullFileName=$fullFileName")
 
         val decryptionKeyFileName = if (BifrostSettings.Keys.enableDecryptKeySave()) {
             "DecryptionKey_${fullFileName}.txt"
@@ -114,23 +115,23 @@ object Downloader {
 
         val downloadDirectory = FileManager.pickDirectory()
         val tempDirectory = FileManager.getTempDirectory()
-        println("[BifrostDownload] performDownload: downloadDir=${downloadDirectory?.getAbsolutePath()}, tempDir=${tempDirectory?.getAbsolutePath()}")
+        BifrostLogger.download.info("performDownload: downloadDir=${downloadDirectory?.getAbsolutePath()}, tempDir=${tempDirectory?.getAbsolutePath()}")
 
         if (downloadDirectory == null) {
-            println("[BifrostDownload] performDownload: downloadDirectory null, aborting")
+            BifrostLogger.download.info("performDownload: downloadDirectory null, aborting")
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
         }
 
         val encFile = (tempDirectory ?: downloadDirectory).child(fullFileName, false) ?: run {
-            println("[BifrostDownload] performDownload: encFile null, aborting")
+            BifrostLogger.download.info("performDownload: encFile null, aborting")
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
         }
         val extractedEncFile = downloadDirectory.child(fullFileName, false) ?: run {
-            println("[BifrostDownload] performDownload: extractedEncFile null, aborting")
+            BifrostLogger.download.info("performDownload: extractedEncFile null, aborting")
             model.endJob("")
             eventManager.sendEvent(Event.Download.Finish)
             return
@@ -145,7 +146,7 @@ object Downloader {
                 dir.child(dec, false)
             }
         }
-        println("[BifrostDownload] performDownload: encFile=${encFile.getAbsolutePath()}, decFile=${decFile?.getAbsolutePath()}")
+        BifrostLogger.download.info("performDownload: encFile=${encFile.getAbsolutePath()}, decFile=${decFile?.getAbsolutePath()}")
 
         // Track temporary files for cleanup
         model.addTempFile(encFile)
@@ -154,7 +155,7 @@ object Downloader {
         model.addTempFile(decKeyFile)
 
         if (decKeyFile != null) {
-            println("[BifrostDownload] performDownload: writing decryption key file")
+            BifrostLogger.download.info("performDownload: writing decryption key file")
         }
         decKeyFile?.openOutputStream(false)?.use { output ->
             if (fullFileName.endsWith(".enc2")) {
@@ -168,7 +169,7 @@ object Downloader {
             }
 
             v4Key?.let {
-                output.write(v4Key.second.toByteArray())
+                output.write(v4Key.logicString.toByteArray())
             }
         }
 
@@ -181,12 +182,12 @@ object Downloader {
         val maxInitRetries = 10
         var initRetries = 0
         var md5: String? = null
-        println("[BifrostDownload] performDownload: entering BinaryInit+download retry loop (max $maxInitRetries)")
+        BifrostLogger.download.info("performDownload: entering BinaryInit+download retry loop (max $maxInitRetries)")
 
         try {
             while (initRetries <= maxInitRetries) {
                 if (initRetries > 0) {
-                    println("[BifrostDownload] performDownload: retry #$initRetries, refreshing nonce")
+                    BifrostLogger.download.info("performDownload: retry #$initRetries, refreshing nonce")
                     FusClient.refreshNonce()
                 }
 
@@ -198,18 +199,18 @@ object Downloader {
                     model.region.value,
                     legacy = false,
                 )
-                println("[BifrostDownload] performDownload: sending BinaryInit request (attempt ${initRetries + 1})")
+                BifrostLogger.download.info("performDownload: sending BinaryInit request (attempt ${initRetries + 1})")
                 FusClient.makeReq(
                     request = FusClient.Request.BINARY_INIT,
                     data = request,
                     signature = null,
                     includeNonce = true,
                 )
-                println("[BifrostDownload] performDownload: BinaryInit response received")
+                BifrostLogger.download.info("performDownload: BinaryInit response received")
 
                 try {
                     val existingLen = encFile.getLength()
-                    println("[BifrostDownload] performDownload: existing enc len=$existingLen, target size=$size, willDownload=${existingLen < size}")
+                    BifrostLogger.download.info("performDownload: existing enc len=$existingLen, target size=$size, willDownload=${existingLen < size}")
                     md5 = if (existingLen < size) {
                         // Single-thread Ktor streaming mode (always used; parallel mode is disabled)
                         FusClient.downloadFile(
@@ -218,7 +219,7 @@ object Downloader {
                             size = size,
                             dest = encFile,
                             onAuthRefresh = {
-                                println("[BifrostDownload] performDownload: onAuthRefresh, refreshing nonce then re-sending BinaryInit")
+                                BifrostLogger.download.info("performDownload: onAuthRefresh, refreshing nonce then re-sending BinaryInit")
                                 FusClient.refreshNonce()
                                 val initRequest = Request.createBinaryInit(
                                     fileName,
@@ -251,10 +252,10 @@ object Downloader {
                             }
                         )
                     } else {
-                        println("[BifrostDownload] performDownload: file already complete, skipping download")
+                        BifrostLogger.download.info("performDownload: file already complete, skipping download")
                         null
                     }
-                    println("[BifrostDownload] performDownload: download phase complete, md5=$md5")
+                    BifrostLogger.download.info("performDownload: download phase complete, md5=$md5")
                     break // download succeeded
                 } catch (e: CancellationException) {
                     throw e
@@ -268,13 +269,13 @@ object Downloader {
                         e.javaClass.simpleName.contains("ClosedByteChannel") ||
                         e.message?.contains("closed", ignoreCase = true) == true ||
                         (e is java.io.IOException && e !is java.nio.file.FileSystemException)
-                    println("[BifrostDownload] performDownload: download error: ${e.javaClass.simpleName}: ${e.message}, isAuth=$isAuth, isTimeout=$isTimeout, isConnectionClosed=$isConnectionClosed")
+                    BifrostLogger.download.info("performDownload: download error: ${e.javaClass.simpleName}: ${e.message}, isAuth=$isAuth, isTimeout=$isTimeout, isConnectionClosed=$isConnectionClosed")
                     if ((isAuth || isTimeout || isConnectionClosed) && initRetries < maxInitRetries) {
                         initRetries++
                         if (isAuth) {
-                            println("[BifrostDownload] performDownload: auth failure, will retry ($initRetries/$maxInitRetries)")
+                            BifrostLogger.download.info("performDownload: auth failure, will retry ($initRetries/$maxInitRetries)")
                         } else {
-                            println("[BifrostDownload] performDownload: connection lost, will retry from offset ($initRetries/$maxInitRetries)")
+                            BifrostLogger.download.info("performDownload: connection lost, will retry from offset ($initRetries/$maxInitRetries)")
                         }
                         continue
                     }
@@ -283,7 +284,7 @@ object Downloader {
             }
 
             if (crc32 != null) {
-                println("[BifrostDownload] performDownload: starting CRC32 check, expected=$crc32")
+                BifrostLogger.download.info("performDownload: starting CRC32 check, expected=$crc32")
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingCRC()
                 val result = CryptUtils.checkCrc32(
@@ -304,20 +305,20 @@ object Downloader {
                         )
                     )
                 }
-                println("[BifrostDownload] performDownload: CRC32 result=$result")
+                BifrostLogger.download.info("performDownload: CRC32 result=$result")
 
                 if (!result) {
-                    println("[BifrostDownload] performDownload: CRC32 check FAILED")
+                    BifrostLogger.download.info("performDownload: CRC32 check FAILED")
                     model.cleanupTempFiles()
                     model.endJob(MR.strings.crcCheckFailed())
                     return
                 }
             } else {
-                println("[BifrostDownload] performDownload: no CRC32 provided, skipping")
+                BifrostLogger.download.info("performDownload: no CRC32 provided, skipping")
             }
 
             if (md5 != null) {
-                println("[BifrostDownload] performDownload: starting MD5 check, expected=$md5")
+                BifrostLogger.download.info("performDownload: starting MD5 check, expected=$md5")
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.checkingMD5()
 
@@ -335,30 +336,30 @@ object Downloader {
                         encFile.openInputStream(),
                     )
                 }
-                println("[BifrostDownload] performDownload: MD5 result=$result")
+                BifrostLogger.download.info("performDownload: MD5 result=$result")
 
                 if (!result) {
-                    println("[BifrostDownload] performDownload: MD5 check FAILED")
+                    BifrostLogger.download.info("performDownload: MD5 check FAILED")
                     model.cleanupTempFiles()
                     model.endJob(MR.strings.md5CheckFailed())
                     return
                 }
             } else {
-                println("[BifrostDownload] performDownload: no MD5 provided, skipping")
+                BifrostLogger.download.info("performDownload: no MD5 provided, skipping")
             }
 
             if (tempDirectory != null && tempDirectory != downloadDirectory && extractedEncFile.getLength() < size) {
-                println("[BifrostDownload] performDownload: copying temp file to download dir")
+                BifrostLogger.download.info("performDownload: copying temp file to download dir")
                 model.speed.value = 0L
                 model.statusText.value = MR.strings.copying()
 
                 val input = encFile.openInputStream() ?: run {
-                    println("[BifrostDownload] performDownload: copy input stream null, aborting")
+                    BifrostLogger.download.info("performDownload: copy input stream null, aborting")
                     model.endJob("")
                     return
                 }
                 val output = extractedEncFile.openOutputStream() ?: run {
-                    println("[BifrostDownload] performDownload: copy output stream null, aborting")
+                    BifrostLogger.download.info("performDownload: copy output stream null, aborting")
                     model.endJob("")
                     return
                 }
@@ -383,31 +384,31 @@ object Downloader {
                             )
                         },
                     )
-                    println("[BifrostDownload] performDownload: copy complete")
+                    BifrostLogger.download.info("performDownload: copy complete")
                 } finally {
                     input.close()
                     output.close()
                     encFile.delete()
-                    println("[BifrostDownload] performDownload: temp enc file deleted after copy")
+                    BifrostLogger.download.info("performDownload: temp enc file deleted after copy")
                 }
             }
 
-            println("[BifrostDownload] performDownload: starting decryption")
+            BifrostLogger.download.info("performDownload: starting decryption")
             model.speed.value = 0L
             model.statusText.value = MR.strings.decrypting()
 
             val key = if (fullFileName.endsWith(".enc2")) {
-                println("[BifrostDownload] performDownload: using V2 key (.enc2)")
+                BifrostLogger.download.info("performDownload: using V2 key (.enc2)")
                 CryptUtils.getV2Key(
                     model.fw.value,
                     model.model.value,
                     model.region.value,
                 ).first
             } else if (info.v4Key != null) {
-                println("[BifrostDownload] performDownload: using V4 key (.enc4)")
-                info.v4Key.first
+                BifrostLogger.download.info("performDownload: using V4 key (.enc4)")
+                info.v4Key.keyBytes
             } else {
-                println("[BifrostDownload] performDownload: no key available, aborting")
+                BifrostLogger.download.info("performDownload: no key available, aborting")
                 model.endJob("")
                 return
             }
@@ -431,18 +432,18 @@ object Downloader {
                     )
                 )
             }
-            println("[BifrostDownload] performDownload: decryption complete")
+            BifrostLogger.download.info("performDownload: decryption complete")
 
             if (BifrostSettings.Keys.autoDeleteEncryptedFirmware()) {
-                println("[BifrostDownload] performDownload: auto-deleting encrypted files")
+                BifrostLogger.download.info("performDownload: auto-deleting encrypted files")
                 encFile.delete()
                 extractedEncFile.delete()
             }
 
-            println("[BifrostDownload] performDownload: DONE")
+            BifrostLogger.download.info("performDownload: DONE")
             model.endJobSuccess(MR.strings.done())
         } catch (e: Throwable) {
-            println("[BifrostDownload] performDownload: FAILED: ${e.javaClass.simpleName}: ${e.message}")
+            BifrostLogger.download.info("performDownload: FAILED: ${e.javaClass.simpleName}: ${e.message}")
             val message = if (e !is CancellationException) "${e.message}" else ""
             model.endJob(message)
         }

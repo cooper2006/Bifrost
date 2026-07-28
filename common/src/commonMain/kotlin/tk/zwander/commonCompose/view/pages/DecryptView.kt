@@ -1,5 +1,6 @@
 package tk.zwander.commonCompose.view.pages
 
+import tk.zwander.common.util.BifrostLogger
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -150,12 +151,17 @@ internal fun DecryptView() {
                             .handleFileDrag {
                                 if (it != null) {
                                     scope.launch {
-                                        val decInfo = DecryptFileInfo(
-                                            encFile = it,
-                                            decFile = PlatformFile(it.getParent()!!, PlatformFile(it.getAbsolutePath()).nameWithoutExtension),
-                                        )
+                                        val parent = it.getParent()
+                                        if (parent != null) {
+                                            val decInfo = DecryptFileInfo(
+                                                encFile = it,
+                                                decFile = PlatformFile(parent, PlatformFile(it.getAbsolutePath()).nameWithoutExtension),
+                                            )
 
-                                        Decrypter.handleFileInput(model, decInfo)
+                                            Decrypter.handleFileInput(model, decInfo)
+                                        } else {
+                                            BifrostLogger.decrypt.info("handleFileDrag: unable to get parent directory for ${it.getAbsolutePath()}")
+                                        }
                                     }
                                     true
                                 } else {

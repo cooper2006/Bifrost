@@ -10,6 +10,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.core.toByteArray
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
 import tk.zwander.common.util.globalHttpClient
@@ -44,15 +45,15 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("Generating nonce.")
+        BifrostLogger.general.info("Generating nonce.")
         makeReq(Request.GENERATE_NONCE)
         BugsnagUtils.addBreadcrumb(
             message = "Nonce: $nonce, Auth: $auth",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("Nonce: $nonce")
-        println("Auth: $auth")
+        BifrostLogger.general.debug("Nonce: $nonce")
+        BifrostLogger.general.debug("Auth: $auth")
     }
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
@@ -104,7 +105,7 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
 
         val body = response.bodyAsText()
 
-        println(request)
+        BifrostLogger.download.debug("Request: $request")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
             // 限制重试次数上限，避免 401 持续返回时无限递归导致栈溢出
@@ -127,7 +128,7 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                println("Error generating nonce.")
+                BifrostLogger.general.error("Error generating nonce.")
             }
         }
 

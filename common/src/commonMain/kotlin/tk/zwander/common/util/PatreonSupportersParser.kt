@@ -1,5 +1,6 @@
 package tk.zwander.common.util
 
+import tk.zwander.common.util.BifrostLogger
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.coroutines.Dispatchers
@@ -17,29 +18,28 @@ data class SupporterInfo(
 
 class PatreonSupportersParser private constructor() {
     companion object {
-        @Suppress("VARIABLE_IN_SINGLETON_WITHOUT_THREAD_LOCAL")
+        @Volatile
         private var instance: PatreonSupportersParser? = null
+        private val lock = CommonLock()
 
         fun getInstance(): PatreonSupportersParser {
-            return instance ?: PatreonSupportersParser().also {
-                instance = it
+            return instance ?: lock.withLock {
+                instance ?: PatreonSupportersParser().also { instance = it }
             }
         }
     }
 
     suspend fun parseSupporters(): List<SupporterInfo> {
-        val supportersString = StringBuilder()
+        return try {
+            val statement = globalHttpClient.get(
+                urlString = "https://raw.githubusercontent.com/zacharee/PatreonSupportersRetrieval/master/app/src/main/assets/supporters.json",
+            )
 
-        withContext(Dispatchers.IO) {
-            try {
-                val statement = globalHttpClient.get("https://raw.githubusercontent.com/zacharee/PatreonSupportersRetrieval/master/app/src/main/assets/supporters.json")
-
-                supportersString.append(statement.bodyAsText())
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            Json.decodeFromString(ListSerializer(SupporterInfo.serializer()), statement.bodyAsText())
+        } catch (e: Exception) {
+            BifrostLogger.supporters.info("Failed to fetch or parse supporters: ${e.message}")
+            e.printStackTrace()
+            emptyList()
         }
-
-        return Json.decodeFromString(ListSerializer(SupporterInfo.serializer()), supportersString.toString())
     }
 }

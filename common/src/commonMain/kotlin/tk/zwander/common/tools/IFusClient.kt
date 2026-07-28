@@ -24,6 +24,7 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.io.InternalIoApi
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.ketch
@@ -164,7 +165,7 @@ interface IFusClient<Request : IFusClient.IRequest> {
 
     fun HttpResponse.is401(body: String): Boolean {
         if (status.value == 401) {
-            println("Response status is 401")
+            BifrostLogger.download.debug("Response status is 401")
             return true
         }
 
@@ -177,7 +178,7 @@ interface IFusClient<Request : IFusClient.IRequest> {
                 ?.text()
 
             if (status == "401") {
-                println("Response body status is 401")
+                BifrostLogger.download.debug("Response body status is 401")
                 return true
             }
         } catch (_: Throwable) {

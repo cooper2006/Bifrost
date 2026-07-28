@@ -13,13 +13,26 @@ object Logger {
     fun getLogger(clazz: Class<*>): org.slf4j.Logger {
         return LoggerFactory.getLogger(clazz)
     }
-    
+
     /**
      * 获取指定名称的日志记录器
      */
     fun getLogger(name: String): org.slf4j.Logger {
         return LoggerFactory.getLogger(name)
     }
+}
+
+/**
+ * Bifrost 按模块分类的日志记录器
+ * 替代 println 用于结构化日志输出，支持按模块和级别过滤
+ */
+object BifrostLogger {
+    val download = Logger.getLogger("BifrostDownload")
+    val decrypt = Logger.getLogger("BifrostDecrypt")
+    val crypt = Logger.getLogger("BifrostCrypt")
+    val io = Logger.getLogger("BifrostIO")
+    val supporters = Logger.getLogger("BifrostSupporters")
+    val general = Logger.getLogger("Bifrost")
 }
 
 /**

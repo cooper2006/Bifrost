@@ -13,6 +13,7 @@ import org.junit.Test
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.data.ChunkSizeCalculator
 import tk.zwander.common.data.ChunkState
+import tk.zwander.common.data.V4Key
 import tk.zwander.common.data.DownloadState
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.Request
@@ -84,7 +85,10 @@ class DownloadTest {
         val fileName = "SM-S936U_3_20260602213641_cpeelkz6q8_fac.zip.enc4"
         val size = 18455490816L
         val crc32 = 1907214658L
-        val v4Key = CryptUtils.md5Provider.hasher().hashBlocking("test-key".toByteArray()) to "1CS6USU669Z6SU9A"
+        val v4Key = V4Key(
+            CryptUtils.md5Provider.hasher().hashBlocking("test-key".toByteArray()),
+            "1CS6USU669Z6SU9A",
+        )
         val fwVer = "S936USQUACZF1/S936UOYNACZF1/S936USQUACZF1/S936USQUACZF1"
         val modelType = "9"
         val logicVal = "ly5sdp7cs1z3ed1x"

@@ -52,8 +52,8 @@ object VersionFetch {
             val responseXml = Ksoup.parse(response.bodyAsText())
 
             if (responseXml.tagName() == "Error") {
-                val code = responseXml.firstElementByTagName("Code")!!.text()
-                val message = responseXml.firstElementByTagName("Message")!!.text()
+                val code = responseXml.firstElementByTagName("Code")?.text() ?: "Unknown"
+                val message = responseXml.firstElementByTagName("Message")?.text() ?: "Unknown error"
 
                 return FetchResult.VersionFetchResult(
                     error = IllegalStateException("Code: ${code}, Message: $message"),

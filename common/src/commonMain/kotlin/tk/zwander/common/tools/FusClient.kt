@@ -2,6 +2,7 @@
 
 package tk.zwander.common.tools
 
+import tk.zwander.common.util.BifrostLogger
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
 import com.fleeksoft.ksoup.Ksoup
 import dev.zwander.kotlin.file.IPlatformFile
@@ -65,15 +66,15 @@ object FusClient : IFusClient<FusClient.Request> {
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("生成随机数。")
+        BifrostLogger.general.info("生成随机数。")
         makeReq(Request.GENERATE_NONCE, "", null, true)
         BugsnagUtils.addBreadcrumb(
             message = "随机数: $nonce, 认证: $auth",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        println("随机数: $nonce")
-        println("认证: $auth")
+        BifrostLogger.general.debug("随机数: $nonce")
+        BifrostLogger.general.debug("认证: $auth")
     }
 
     private suspend fun makeSignatureHash(signature: String?): String? {
@@ -123,15 +124,15 @@ object FusClient : IFusClient<FusClient.Request> {
     ): String = makeReqWithRetry(request, data, signature, includeNonce, retryCount = 0)
 
     private suspend fun makeReqWithRetry(request: Request, data: String, signature: String?, includeNonce: Boolean, retryCount: Int): String {
-        println("[BifrostDownload] makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}, retry=$retryCount")
+        BifrostLogger.download.info("makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}, retry=$retryCount")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
-            println("[BifrostDownload] makeReq: nonce blank, generating...")
+            BifrostLogger.download.info("makeReq: nonce blank, generating...")
             generateNonce()
         }
 
         val authV = getAuthV(cloud = request.cloud, signature = signature)
         val url = "https://neofussvr.sslcs.cdngc.net/${request.value}"
-        println("[BifrostDownload] makeReq: POST $url, sessionId=${sessionId.take(8)}...")
+        BifrostLogger.download.info("makeReq: POST $url, sessionId=${sessionId.take(8)}...")
 
         val response =
             globalHttpClient.request(url) {
@@ -144,17 +145,17 @@ object FusClient : IFusClient<FusClient.Request> {
                 }
                 setBody(data)
             }
-        println("[BifrostDownload] makeReq: response status=${response.status.value}")
+        BifrostLogger.download.info("makeReq: response status=${response.status.value}")
 
         val body = response.bodyAsText()
-        println("[BifrostDownload] makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
+        BifrostLogger.download.info("makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
             if (retryCount >= 3) {
-                println("[BifrostDownload] makeReq: 401 after $retryCount retries, giving up")
+                BifrostLogger.download.info("makeReq: 401 after $retryCount retries, giving up")
                 throw RuntimeException("认证持续失败（重试 $retryCount 次后仍为 401）")
             }
-            println("[BifrostDownload] makeReq: got 401, regenerating nonce and retrying (${retryCount + 1}/3)")
+            BifrostLogger.download.info("makeReq: got 401, regenerating nonce and retrying (${retryCount + 1}/3)")
             generateNonce()
 
             return makeReqWithRetry(request, data, signature, includeNonce, retryCount + 1)
@@ -173,7 +174,7 @@ object FusClient : IFusClient<FusClient.Request> {
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                println("生成随机数时出错。")
+                BifrostLogger.general.error("生成随机数时出错。")
                 e.printStackTrace()
             }
         }
@@ -215,12 +216,12 @@ object FusClient : IFusClient<FusClient.Request> {
         onAuthRefresh: (suspend () -> Unit)? = null,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
     ): String? {
-        println("[BifrostDownload] downloadFile start: fileName=$fileName, start=$start, size=${size}bytes (${size / (1024 * 1024)}MB), dest=${dest.getAbsolutePath()}")
+        BifrostLogger.download.info("downloadFile start: fileName=$fileName, start=$start, size=${size}bytes (${size / (1024 * 1024)}MB), dest=${dest.getAbsolutePath()}")
         val url = getDownloadUrl(fileName)
-        println("[BifrostDownload] downloadFile: url=$url")
+        BifrostLogger.download.info("downloadFile: url=$url")
 
         // 单线程 Ktor 流式下载，不经过 Ketch（Ketch 内部会先发 HEAD 消耗 auth）
-        println("[BifrostDownload] downloadFile: using Ktor single-thread streaming mode, size=${size / (1024 * 1024)}MB")
+        BifrostLogger.download.info("downloadFile: using Ktor single-thread streaming mode, size=${size / (1024 * 1024)}MB")
 
         val maxAuthRetries = 3
         var authRetries = 0
@@ -249,7 +250,7 @@ object FusClient : IFusClient<FusClient.Request> {
                         connectTimeoutMillis = 30_000L
                     }
                 }.execute { response ->
-                    println("[BifrostDownload] downloadFile: GET response status=${response.status.value}")
+                    BifrostLogger.download.info("downloadFile: GET response status=${response.status.value}")
 
                     if (response.status.value == 401) {
                         throw tk.zwander.common.exceptions.AuthExpiredException()
@@ -286,7 +287,7 @@ object FusClient : IFusClient<FusClient.Request> {
                             // 每 5 秒打印一次下载进度日志
                             if (now - lastLogTime > 5000) {
                                 val pct = if (size > 0) String.format("%.1f", downloadedBytes * 100.0 / size) else "0"
-                                println("[BifrostDownload] progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
+                                BifrostLogger.download.info("progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
                                 lastLogTime = now
                             }
                         }
@@ -300,22 +301,22 @@ object FusClient : IFusClient<FusClient.Request> {
                     val bps = if (elapsedTotal > 0) (downloadedBytes / elapsedTotal).toLong() else 0L
                     progressCallback(downloadedBytes, size, bps)
 
-                    println("[BifrostDownload] downloadFile: done: ${downloadedBytes / (1024 * 1024)}MB in ${String.format("%.1f", elapsedTotal)}s, bps=${bps / 1024}KB/s")
+                    BifrostLogger.download.info("downloadFile: done: ${downloadedBytes / (1024 * 1024)}MB in ${String.format("%.1f", elapsedTotal)}s, bps=${bps / 1024}KB/s")
                 }
 
                 return null
             } catch (e: CancellationException) {
-                println("[BifrostDownload] downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
+                BifrostLogger.download.info("downloadFile: cancelled at ${downloadedBytes / (1024 * 1024)}MB")
                 throw e
             } catch (e: Exception) {
                 val isAuth = e is tk.zwander.common.exceptions.AuthExpiredException
                 if (isAuth && onAuthRefresh != null && authRetries < maxAuthRetries) {
                     authRetries++
-                    println("[BifrostDownload] downloadFile: 401 during download, calling onAuthRefresh ($authRetries/$maxAuthRetries)")
+                    BifrostLogger.download.info("downloadFile: 401 during download, calling onAuthRefresh ($authRetries/$maxAuthRetries)")
                     onAuthRefresh.invoke()
                     continue
                 }
-                println("[BifrostDownload] downloadFile: failed: ${e.javaClass.simpleName}: ${e.message}")
+                BifrostLogger.download.info("downloadFile: failed: ${e.javaClass.simpleName}: ${e.message}")
                 throw e
             }
         }

@@ -1,5 +1,6 @@
 package tk.zwander.common.util
 
+import tk.zwander.common.util.BifrostLogger
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -26,34 +27,44 @@ suspend fun streamOperationWithProgress(
     chunkSize: Int = DEFAULT_CHUNK_SIZE,
     progressOffset: Long = 0L,
 ) {
-    val buffer = ByteArray(chunkSize)
+    try {
+        val buffer = ByteArray(chunkSize)
 
-    trackOperationProgress(
-        size = size,
-        progressCallback = progressCallback,
-        operation = {
-            val len = input.readAtMostTo(buffer, 0, buffer.size)
+        trackOperationProgress(
+            size = size,
+            progressCallback = progressCallback,
+            operation = {
+                val len = input.readAtMostTo(buffer, 0, buffer.size)
 
-            if (len > 0) {
-                val exactData = if (len == buffer.size) {
-                    buffer
-                } else {
-                    buffer.sliceArray(0 until len)
+                if (len > 0) {
+                    val exactData = if (len == buffer.size) {
+                        buffer
+                    } else {
+                        buffer.sliceArray(0 until len)
+                    }
+
+                    val result = operation?.invoke(exactData) ?: exactData
+
+                    output.write(result, 0, result.size)
                 }
 
-                val result = operation?.invoke(exactData) ?: exactData
-
-                output.write(result, 0, result.size)
+                len.toLong()
+            },
+            progressOffset = progressOffset,
+        )
+    } finally {
+        withContext(Dispatchers.IO) {
+            try {
+                input.close()
+            } catch (e: Exception) {
+                BifrostLogger.io.info("streamOperationWithProgress: failed to close input: ${e.message}")
             }
-
-            len.toLong()
-        },
-        progressOffset = progressOffset,
-    )
-
-    withContext(Dispatchers.IO) {
-        input.close()
-        output.close()
+            try {
+                output.close()
+            } catch (e: Exception) {
+                BifrostLogger.io.info("streamOperationWithProgress: failed to close output: ${e.message}")
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 package tk.zwander.common.tools
 
+import tk.zwander.common.util.BifrostLogger
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Document
 import dev.whyoleg.cryptography.DelicateCryptographyApi
@@ -10,6 +11,7 @@ import org.redundent.kotlin.xml.PrintOptions
 import org.redundent.kotlin.xml.xml
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.data.FetchResult
+import tk.zwander.common.data.V4Key
 import tk.zwander.common.data.exception.VersionCheckException
 import tk.zwander.common.data.exception.VersionException
 import tk.zwander.common.data.exception.VersionMismatchException
@@ -56,7 +58,7 @@ object Request {
         includeNonce: Boolean,
         legacy: Boolean = false,
     ): Pair<String, Document> {
-        println("[BifrostDownload] BinaryInform start: fw=$fw, model=$model, region=$region, imeiSerialCount=${imeiSerial.split("\n").flatMap { it.split(";") }.size}")
+        BifrostLogger.download.info("BinaryInform start: fw=$fw, model=$model, region=$region, imeiSerialCount=${imeiSerial.split("\n").flatMap { it.split(";") }.size}")
         val splitImeiSerial = imeiSerial.split("\n").flatMap { it.split(";") }
 
         var latestRequest = ""
@@ -87,7 +89,7 @@ object Request {
 
                 Ksoup.parse(response)
             } catch (e: Throwable) {
-                println("[BifrostDownload] BinaryInform attempt ${index + 1} error: ${e.javaClass.simpleName}: ${e.message}")
+                BifrostLogger.download.info("BinaryInform attempt ${index + 1} error: ${e.javaClass.simpleName}: ${e.message}")
                 latestError = e
                 e.printStackTrace()
                 return@forEachIndexed
@@ -99,7 +101,7 @@ object Request {
                     ?.firstElementByTagName("Status")
                     ?.text()
 
-                println("[BifrostDownload] BinaryInform attempt ${index + 1} status for IMEI $imei: $status")
+                BifrostLogger.download.info("BinaryInform attempt ${index + 1} status for IMEI $imei: $status")
 
                 if (status != "408") {
                     return (latestRequest to result)
@@ -219,8 +221,15 @@ object Request {
         legacy: Boolean,
     ): String {
         val logicCheck = run {
-            val special = fileName.slice(fileName.length - 25 until fileName.length - 9)
-            getLogicCheck(special, nonce)
+            // 防御性检查：文件名至少需要 25 个字符才能提取中间段
+            // 正常三星固件文件名（如 SM-G970F_8_WWW_XXXX_XXXX.zip.enc2）远长于此
+            if (fileName.length >= 25) {
+                val special = fileName.slice(fileName.length - 25 until fileName.length - 9)
+                getLogicCheck(special, nonce)
+            } else {
+                BifrostLogger.download.info("createBinaryInit: fileName too short for logic check (len=${fileName.length}), using empty")
+                ""
+            }
         }
 
         val xml = xml("FUSMsg") {
@@ -255,20 +264,20 @@ object Request {
         onVersionException: (suspend (VersionException, BinaryFileInfo?) -> Unit)? = null,
         shouldReportError: suspend (Exception) -> Boolean = { true },
     ): BinaryFileInfo? {
-        println("[BifrostDownload] retrieveBinaryFileInfo: fw=$fw, model=$model, region=$region")
+        BifrostLogger.download.info("retrieveBinaryFileInfo: fw=$fw, model=$model, region=$region")
         val result = getBinaryFile(
             fw = fw, model = model, region = region, imeiSerial = imeiSerial, legacy = legacy,
         )
 
         val (info, error, output, requestBody) = result
-        println("[BifrostDownload] retrieveBinaryFileInfo: info=${info != null}, error=${error?.javaClass?.simpleName}, responseCode=${result.responseCode}")
+        BifrostLogger.download.info("retrieveBinaryFileInfo: info=${info != null}, error=${error?.javaClass?.simpleName}, responseCode=${result.responseCode}")
 
         if (error is VersionException && onVersionException != null) {
-            println("[BifrostDownload] retrieveBinaryFileInfo: version exception, delegating to callback")
+            BifrostLogger.download.info("retrieveBinaryFileInfo: version exception, delegating to callback")
             onVersionException(error, info)
             return null
         } else if (error != null) {
-            println("[BifrostDownload] retrieveBinaryFileInfo: error -> ${error.message}")
+            BifrostLogger.download.info("retrieveBinaryFileInfo: error -> ${error.message}")
             onErrorFinish("${error.message ?: MR.strings.error()}\n\n${output}")
             if (result.isReportableCode() &&
                 !output.contains("Incapsula") &&
@@ -298,7 +307,7 @@ object Request {
         imeiSerial: String,
         legacy: Boolean,
     ): FetchResult.GetBinaryFileResult {
-        println("[BifrostDownload] getBinaryFile: calling performBinaryInformRetry...")
+        BifrostLogger.download.info("getBinaryFile: calling performBinaryInformRetry...")
         val (request, responseXml) = try {
             performBinaryInformRetry(
                 fw = fw.uppercase(),
@@ -309,7 +318,7 @@ object Request {
                 legacy = legacy,
             )
         } catch (e: Exception) {
-            println("[BifrostDownload] getBinaryFile: BinaryInform failed: ${e.javaClass.simpleName}: ${e.message}")
+            BifrostLogger.download.info("getBinaryFile: BinaryInform failed: ${e.javaClass.simpleName}: ${e.message}")
             CrossPlatformBugsnag.notify(e)
 
             return FetchResult.GetBinaryFileResult(
@@ -322,7 +331,7 @@ object Request {
                 requestBody = "",
             )
         }
-        println("[BifrostDownload] getBinaryFile: BinaryInform succeeded, parsing response")
+        BifrostLogger.download.info("getBinaryFile: BinaryInform succeeded, parsing response")
 
         try {
             val status = responseXml.firstElementByTagName("FUSBody")
@@ -330,10 +339,10 @@ object Request {
                 ?.firstElementByTagName("Status")
                 ?.text()
 
-            println("[BifrostDownload] getBinaryFile: FUS status=$status")
+            BifrostLogger.download.info("getBinaryFile: FUS status=$status")
 
             if (status == "F01") {
-                println("[BifrostDownload] getBinaryFile: invalid firmware (F01)")
+                BifrostLogger.download.info("getBinaryFile: invalid firmware (F01)")
                 return FetchResult.GetBinaryFileResult(
                     error = Exception(MR.strings.invalidFirmwareError()),
                     rawOutput = responseXml.toString(),
@@ -343,7 +352,7 @@ object Request {
             }
 
             if (status == "408") {
-                println("[BifrostDownload] getBinaryFile: invalid IMEI/serial (408)")
+                BifrostLogger.download.info("getBinaryFile: invalid IMEI/serial (408)")
                 return FetchResult.GetBinaryFileResult(
                     error = Exception(MR.strings.invalid_imei_or_serial()),
                     rawOutput = responseXml.toString(),
@@ -353,7 +362,7 @@ object Request {
             }
 
             if (status != "200" && status != "S00") {
-                println("[BifrostDownload] getBinaryFile: bad status=$status")
+                BifrostLogger.download.info("getBinaryFile: bad status=$status")
                 return FetchResult.GetBinaryFileResult(
                     error = Exception(MR.strings.badReturnStatus(status.toString())),
                     rawOutput = responseXml.toString(),
@@ -376,7 +385,7 @@ object Request {
                 ?.firstDataElementDataByTagName("BINARY_BYTE_SIZE")
                 .run {
                     if (isNullOrBlank()) {
-                        println("[BifrostDownload] getBinaryFile: BINARY_BYTE_SIZE missing")
+                        BifrostLogger.download.info("getBinaryFile: BINARY_BYTE_SIZE missing")
                         return noBinaryError()
                     } else {
                         toLong()
@@ -387,10 +396,10 @@ object Request {
                 ?.firstElementByTagName("Put")
                 ?.firstDataElementDataByTagName("BINARY_NAME")
                 ?: run {
-                    println("[BifrostDownload] getBinaryFile: BINARY_NAME missing")
+                    BifrostLogger.download.info("getBinaryFile: BINARY_NAME missing")
                     return noBinaryError()
                 }
-            println("[BifrostDownload] getBinaryFile: parsed size=$size, fileName=$fileName")
+            BifrostLogger.download.info("getBinaryFile: parsed size=$size, fileName=$fileName")
 
             fun checkAgainstModelString(fileSegment: String, modelString: String): Boolean {
                 if (modelString.isEmpty() || modelString.endsWith('-')) {
@@ -421,7 +430,8 @@ object Request {
             suspend fun generateInfo(): BinaryFileInfo {
                 val path = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
-                    ?.firstDataElementDataByTagName("MODEL_PATH")!!
+                    ?.firstDataElementDataByTagName("MODEL_PATH")
+                    ?: throw IllegalStateException("响应中缺少 MODEL_PATH 字段")
 
                 val crc32 = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
@@ -434,7 +444,7 @@ object Request {
                 } catch (e: Exception) {
                     e.printStackTrace()
                     null
-                }
+                }?.let { V4Key(it.first, it.second) }
 
                 val fwVer = responseXml.firstElementByTagName("FUSBody")
                     ?.firstElementByTagName("Put")
@@ -448,7 +458,8 @@ object Request {
                     ?.firstElementByTagName("Put")
                     .run {
                         this?.firstDataElementDataByTagName("LOGIC_VALUE_FACTORY")
-                            ?: this?.firstDataElementDataByTagName("LOGIC_VALUE_HOME")!!
+                            ?: this?.firstDataElementDataByTagName("LOGIC_VALUE_HOME")
+                            ?: throw IllegalStateException("响应中缺少 LOGIC_VALUE_FACTORY 和 LOGIC_VALUE_HOME 字段")
                     }
 
                 return BinaryFileInfo(
@@ -481,7 +492,7 @@ object Request {
             }
 
             if (dataFile.isNullOrBlank()) {
-                println("[BifrostDownload] getBinaryFile: no dataFile, returning info with VersionCheckException")
+                BifrostLogger.download.info("getBinaryFile: no dataFile, returning info with VersionCheckException")
                 return FetchResult.GetBinaryFileResult(
                     info = generateInfo(),
                     error = VersionCheckException(MR.strings.versionCheckError()),
@@ -489,7 +500,7 @@ object Request {
                     responseCode = status,
                 )
             }
-            println("[BifrostDownload] getBinaryFile: dataFile=$dataFile, starting version match")
+            BifrostLogger.download.info("getBinaryFile: dataFile=$dataFile, starting version match")
 
             val dataIndex = getIndex(dataFile)
 
@@ -554,7 +565,7 @@ object Request {
                 if (served != fw || !cscMatch || !cpMatch || !fwVersionMatch ||
                     !fwPdaMatch || !cscSuffixMatch || !cpSuffixMatch
                 ) {
-                    println("[BifrostDownload] getBinaryFile: version mismatch! requested=$fw, served=$served, cscMatch=$cscMatch, cpMatch=$cpMatch, fwVerMatch=$fwVersionMatch, pdaMatch=$fwPdaMatch")
+                    BifrostLogger.download.info("getBinaryFile: version mismatch! requested=$fw, served=$served, cscMatch=$cscMatch, cpMatch=$cpMatch, fwVerMatch=$fwVersionMatch, pdaMatch=$fwPdaMatch")
                     return FetchResult.GetBinaryFileResult(
                         info = generateInfo(),
                         error = VersionMismatchException(MR.strings.versionMismatch(fw, served)),
@@ -562,17 +573,17 @@ object Request {
                         responseCode = status,
                     )
                 }
-                println("[BifrostDownload] getBinaryFile: version match OK (served=$served)")
+                BifrostLogger.download.info("getBinaryFile: version match OK (served=$served)")
             }
 
-            println("[BifrostDownload] getBinaryFile: returning success info")
+            BifrostLogger.download.info("getBinaryFile: returning success info")
             return FetchResult.GetBinaryFileResult(
                 info = generateInfo(),
                 requestBody = request,
                 responseCode = status,
             )
         } catch (e: Exception) {
-            println("[BifrostDownload] getBinaryFile: parse exception: ${e.javaClass.simpleName}: ${e.message}")
+            BifrostLogger.download.info("getBinaryFile: parse exception: ${e.javaClass.simpleName}: ${e.message}")
             return FetchResult.GetBinaryFileResult(
                 error = e,
                 rawOutput = responseXml.toString(),

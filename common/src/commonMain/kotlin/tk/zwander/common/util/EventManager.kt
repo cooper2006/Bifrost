@@ -4,16 +4,17 @@ import io.ktor.util.collections.ConcurrentSet
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-val eventManager: EventManager
-    get() = EventManager.getInstance()
+val eventManager: EventManager by lazy { EventManager.create() }
 
 class EventManager private constructor() {
     companion object {
+        @Volatile
         private var instance: EventManager? = null
+        private val lock = CommonLock()
 
-        fun getInstance(): EventManager {
-            return instance ?: EventManager().apply {
-                instance = this
+        fun create(): EventManager {
+            return instance ?: lock.withLock {
+                instance ?: EventManager().also { instance = it }
             }
         }
     }

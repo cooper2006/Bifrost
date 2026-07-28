@@ -21,6 +21,7 @@
 /.idea/gradle.xml
 /.idea/misc.xml
 **/.DS_Store
+.reasonix/
 /.kotlin/
 
 .DS_Store

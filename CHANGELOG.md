@@ -11,6 +11,8 @@
 - `DownloadModel.endJobSuccess()` 方法：显式标记任务成功完成，解决此前通过 `text == "done"` 硬编码字符串判断成功的不可靠问题
 - **专用异常类型**：新增 `AuthExpiredException`、`DownloadTimeoutException`、`ConnectionClosedException`，替代通过异常消息字符串匹配判断错误类型的方式
 - **`copying` 字符串资源**：将硬编码的 "Copying" 状态文本本地化（base + zh-rCN）
+- **`CommonLock` 跨平台锁**：基于 expect/actual 的非挂起锁工具类（JVM 用 synchronized，Darwin 用自旋锁）
+- **`V4Key` 数据类**：将 `BinaryFileInfo.v4Key` 从 `Pair<ByteArray, String>` 改为专用 `V4Key` 类，正确实现 `equals`/`hashCode`（用 `contentEquals` 比较 ByteArray 内容）
 
 ### Changed
 - **用 Ktor 流式下载替换 Ketch**：`FusClient.downloadFile()` 现直接使用 Ktor HTTP 客户端；移除 Ketch，因为它在下载前会发 HEAD 请求，消耗 FUS auth 并导致后续请求失败
@@ -22,6 +24,7 @@
 - **`IFusClient` 默认实现**：`downloadFile` 默认实现现调用接口自身的抽象方法（`getAuthV()`、`getDownloadUrl()`），而非直接依赖 `FusClientLegacy` 具体类
 - **统一超时配置**：`IFusClient` 默认实现中 Android 分支的 socket/connect 超时从无限改为 60 秒/30 秒，与 `FusClient` 保持一致
 - **暂停检查提取为公共函数**：`waitWhilePaused()` 扩展函数替代 4 处重复的 while+delay 代码块
+- **统一日志输出**：将全代码库剩余的 `println` 诊断输出全部替换为 `BifrostLogger`（SLF4J）模块分级日志，支持按模块和级别过滤
 
 ### Fixed
 - 从 `common/build.gradle.kts` 和 `desktop/build.gradle.kts` 移除未使用的 `jvmToolchain`
@@ -37,6 +40,20 @@
 - **`DownloadModel._tempFiles` 线程安全**：改用 `synchronizedList`，`cleanupTempFiles` 在 `synchronized` 块中执行复合操作
 - **CRC32/MD5 校验失败时未清理临时文件**：校验失败时现主动调用 `cleanupTempFiles()`，避免损坏文件残留磁盘
 - **异常分类改用类型判断**：`FusClient` 和 `Downloader` 中 401/超时/连接断开的判断从字符串匹配改为 `is` 类型判断
+- **`Decrypter.onDecrypt` 非空断言**：移除 2 处 `!!`，未选择文件或 v4Key 缺失时返回友好错误提示而非崩溃
+- **`Request.createBinaryInit` 文件名越界**：添加长度检查，文件名过短时返回空 logicCheck 而非抛异常
+- **`BaseModel._jobs` 并发安全**：使用 `CommonLock` 保护 `launchJob` 和 `endJob` 的读改写操作
+- **`CryptUtils.checkMD5` 重复关闭流**：移除 `checkMD5` 中的重复 `.close()`，统一由 `calculateMD5` 的 finally 块关闭
+- **`CryptUtils.Legacy.unpad` 填充值未验证**：添加 1-16 范围检查，非法填充值时返回原数据而非越界
+- **`CryptUtils.kt` 损坏注释**：清理 git diff 残留的 `@@ -139,10 +163,8 @@` 标记
+- **`VersionFetch` 错误解析 NPE**：`Code`/`Message` 字段改用安全调用，缺失时返回 "Unknown"
+- **`Request.generateInfo` 非空断言**：`MODEL_PATH` 和 `LOGIC_VALUE_HOME` 的 `!!` 改为抛出带上下文的 `IllegalStateException`
+- **`ProgressUtils.streamOperationWithProgress` 资源泄漏**：用 try/finally 包裹，确保异常/取消时关闭 input/output 流
+- **`DecryptView` 文件拖拽 NPE**：`getParent()!!` 改为安全调用，无父目录时跳过而非崩溃
+- **`PatreonSupportersParser` 网络失败崩溃**：JSON 解析移入 try/catch，网络或解析失败时返回空列表而非崩溃
+- **`EventManager` / `PatreonSupportersParser` 单例线程安全**：改用 `@Volatile` + `CommonLock` 双重检查锁定
+- **`History.kt` 字符串截取越界**：`substring(lastIndex - 3)` 添加长度检查，过短时返回原字符串
+- **`FetchResult.ignoredCodes` 可变数组**：`arrayOf` 改为 `setOf` 不可变集合
 
 ---
 

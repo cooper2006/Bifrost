@@ -2,7 +2,7 @@
 
 本文档详细介绍点击"下载"按钮后，Bifrost 从三星服务器获取固件的完整技术流程。涵盖代码层面与实际运行时行为。
 
-> **文档版本：** v2.3.0+（Ktor 流式下载、断点续传、连接超时重试、失败保留临时文件）
+> **文档版本：** v2.1.3+（Ktor 流式下载、断点续传、连接超时重试、失败保留临时文件、专用异常类型、统一日志输出）
 
 ---
 
@@ -275,9 +275,10 @@ while (initRetries <= maxInitRetries) {
         }
         break  // 下载成功
     } catch (e: Exception) {
-        val isAuth = e.message?.contains("401") == true
-        val isTimeout = e is SocketTimeoutException || ...
-        val isConnectionClosed = e is IOException || ...
+        // 使用专用异常类型判断，而非字符串匹配
+        val isAuth = e is AuthExpiredException
+        val isTimeout = e is DownloadTimeoutException
+        val isConnectionClosed = e is ConnectionClosedException
         if ((isAuth || isTimeout || isConnectionClosed) && initRetries < maxInitRetries) {
             initRetries++
             continue   // 从当前文件偏移续传
@@ -707,28 +708,39 @@ sequenceDiagram
 | 等级 | 问题 | 位置 | 状态 |
 |------|------|------|------|
 | 🔴 关键 | 暂停按钮不影响 Ktor 网络流读取，下载仍在后台进行 | `DownloadView.kt` toggle → `isPaused` flag | 未修复 |
-| 🟡 中等 | `exception.message!!` 可能 NPE | `Downloader.kt:54` | 低风险，建议加固 |
-| 🟡 中等 | 文件名可能超过 255 字符限制 | `Downloader.kt:91-94` | 未修复 |
+| 🟡 中等 | 文件名可能超过 255 字符限制 | `Downloader.kt` | 未修复 |
 | 🟡 中等 | 暂停检查使用 busy-wait `while(delay(100))` | `Downloader.kt` 4 处 | 可优化为 StateFlow 挂起 |
 
 ## 已修复问题
 
 | 问题 | 修复内容 | 版本 |
 |------|----------|------|
-| 成功下载后 `cleanupTempFiles()` 误删最终文件 | 改为仅在成功/取消时清理，失败时保留以支持续传 | v2.3.0+ |
-| Ketch 库下载前自动发 HEAD 消耗 auth | 移除 Ketch，改用 Ktor 直接流式下载 | v2.3.0+ |
-| 大文件 socket 超时后无法恢复 | 实现 HTTP Range 断点续传 + 超时重试 | v2.3.0+ |
-| 下载连接静默断开后无限阻塞 | 设置 socket 60s 超时 | v2.3.0+ |
+| 成功下载后 `cleanupTempFiles()` 误删最终文件 | 改为仅在成功/取消时清理，失败时保留以支持续传 | v2.1.3+ |
+| Ketch 库下载前自动发 HEAD 消耗 auth | 移除 Ketch，改用 Ktor 直接流式下载 | v2.1.3+ |
+| 大文件 socket 超时后无法恢复 | 实现 HTTP Range 断点续传 + 超时重试 | v2.1.3+ |
+| 下载连接静默断开后无限阻塞 | 设置 socket 60s 超时 | v2.1.3+ |
+| FusClientLegacy.makeReq 无限递归 | 添加 makeReqWithRetry 限制最多 3 次重试 | v2.1.3+ |
+| 异常分类使用字符串匹配 | 改用专用异常类型（AuthExpiredException / DownloadTimeoutException / ConnectionClosedException） | v2.1.3+ |
+| 全代码库 println 诊断输出 | 统一替换为 BifrostLogger（SLF4J）模块分级日志 | v2.1.3+ |
+| 多线程下载速度不稳定 | 回退为 Ktor 单线程流式下载，ParallelDownloader 标记 @Deprecated | v2.1.3+ |
 | `downloadDirectory` 空指针 | 增加 null 检查，提前 return | v2.2.0 |
-| `v4Key?.first!!` NPE | 改为 `if (info.v4Key != null)` 安全分支 | v2.2.0 |
+| `v4Key?.first!!` NPE | 改为 `V4Key` 数据类 + 安全调用 | v2.1.3+ |
 | 请求头中包含 `Set-Cookie`（只应是响应头） | 移除 | v2.2.0 |
-| MD5 探测使用 GET 请求 | 改为 HEAD 请求（现版本改为不主动探测，按返回值校验） | v2.2.0 |
+| MD5 探测使用 GET 请求 | 改为 HEAD 请求（现版本不主动探测，按返回值校验） | v2.2.0 |
+| `BinaryFileInfo.v4Key` ByteArray 引用相等 | 创建 `V4Key` 数据类，使用 `contentEquals` 值比较 | v2.1.3+ |
+| `ProgressUtils` 流泄漏 | 用 try/finally 包裹，确保异常/取消时关闭流 | v2.1.3+ |
+| `EventManager` / `PatreonSupportersParser` 单例线程不安全 | 改用 `@Volatile` + `CommonLock` 双重检查锁定 | v2.1.3+ |
+| `History.kt` 字符串截取越界 | 添加长度检查，过短时返回原字符串 | v2.1.3+ |
+| `FetchResult.ignoredCodes` 可变数组 | 改为 `setOf` 不可变集合 | v2.1.3+ |
 
 ## 代码变更记录
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
-| (当前) | 2026-06-24 | 移除 Ketch，改用 Ktor 流式下载；实现 Range 断点续传；socket 超时策略；失败保留临时文件；重试上限提升至 10 |
+| (当前) | 2026-07-28 | 统一日志输出：全代码库 println 替换为 BifrostLogger（SLF4J）模块分级日志 |
+| (当前) | 2026-07-28 | 第三轮代码审查修复：V4Key 数据类、流泄漏、单例线程安全、字符串越界、可变数组等 15 项修复 |
+| (当前) | 2026-07-28 | 第二轮代码审查修复：FusClientLegacy 无限递归、异常类型专用化、ParallelDownloader 弃用、Decrypter NPE 等 |
+| (当前) | 2026-07-28 | 第一轮代码审查修复：同步锁、@Volatile、下载器线程安全、CRC32/MD5 校验清理等 |
 | `d7570826` | 2026-06-24 | 暂停/恢复按钮、临时文件清理、401 重试循环 |
 | `b831bb77` | 2026-06-24 | changelog 更新 |
 

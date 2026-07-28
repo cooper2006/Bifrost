@@ -4,10 +4,10 @@ sealed class FetchResult {
     open val error: Exception? = null
     open val rawOutput: String = ""
     open val responseCode: String? = null
-    open val ignoredCodes = arrayOf("408", "F01")
+    open val ignoredCodes: Set<String> = setOf("408", "F01")
 
     fun isReportableCode(): Boolean {
-        return !ignoredCodes.contains(responseCode)
+        return responseCode !in ignoredCodes
     }
 
     class VersionFetchResult(

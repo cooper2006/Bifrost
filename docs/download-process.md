@@ -414,7 +414,7 @@ fun endJobSuccess(text: String) {
 }
 ```
 
-> **变更说明（v2.3.0+）：** 此前 `onEnd()` 通过 `text == "done"` 硬编码字符串判断成功，不可靠（本地化后字符串可能不同），且在所有路径（含失败）上都可能执行 cleanup，删除已下载的加密文件导致断点续传失效。现已修正为：
+> **变更说明（v2.2.0+）：** 此前 `onEnd()` 通过 `text == "done"` 硬编码字符串判断成功，不可靠（本地化后字符串可能不同），且在所有路径（含失败）上都可能执行 cleanup，删除已下载的加密文件导致断点续传失效。现已修正为：
 > - **成功时**调用 `endJobSuccess()` 设置 `_jobSuccess = true`，触发 cleanup
 > - **取消时**`text.isBlank()` 为真，触发 cleanup
 > - **失败时**两者皆为 false，保留已下载部分，配合 `start = encFile.getLength()` 实现续传
@@ -765,7 +765,7 @@ sequenceDiagram
 
 | 问题 | 修复内容 | 版本 |
 |------|----------|------|
-| FusClient/FusClientLegacy Mutex 死锁 | 将 `getAuthV` 和 `makeSignatureHash` 拆分为：<br>- 公开 suspend 版本（自行加锁，供外部调用）<br>- 内部非 suspend 版本（假设调用方已持有锁，供 `makeReqInternal` 调用）<br>`makeReqInternal` 改为调用内部版本，避免重复加锁 | v2.1.3+ |
+| FusClient/FusClientLegacy Mutex 死锁 | 将 `getAuthV` 和 `makeSignatureHash` 拆分为：<br>- 公开 suspend 版本（自行加锁，供外部调用）<br>- 内部非 suspend 版本（假设调用方已持有锁，供 `makeReqInternal` 调用）<br>`makeReqInternal` 改为调用内部版本，避免重复加锁 | v2.2.0+ |
 | 单体 performDownload 难以测试和维护 | 拆分为 7 个阶段方法（buildDownloadContext/writeDecryptionKey/phaseBinaryInitAndDownload 等），每个方法单一职责 | v2.2.0+ |
 | 下载进度/速度/状态三个独立字段管理混乱 | 引入 DownloadStateMachine + DownloadPhase sealed interface，单 StateFlow 驱动 UI | v2.2.0+ |
 | 协程管理使用内联 _jobs 列表 | JobManager（SupervisorJob + Dispatchers.IO）+ invokeOnCompletion 自动检测 | v2.2.0+ |

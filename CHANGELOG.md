@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-29
+
 ### Added
 - **DownloadStateMachine**：基于 `DownloadPhase` sealed interface 的下载状态机，单 `StateFlow<DownloadPhase>` 驱动 UI 更新，替代原有的 `progress`/`speed`/`statusText` 三字段方案
 - **`Phase` 枚举与 `Progress` 数据类**：定义下载全生命周期的 10 个状态（Idle/FetchingInfo/BinaryInit/Downloading/VerifyingCrc/VerifyingMd5/Copying/Decrypting/Done/Error），每阶段携带 `Progress(current, max, bytesPerSecond)`

@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+### Added
+- **DownloadStateMachine**：基于 `DownloadPhase` sealed interface 的下载状态机，单 `StateFlow<DownloadPhase>` 驱动 UI 更新，替代原有的 `progress`/`speed`/`statusText` 三字段方案
+- **`Phase` 枚举与 `Progress` 数据类**：定义下载全生命周期的 10 个状态（Idle/FetchingInfo/BinaryInit/Downloading/VerifyingCrc/VerifyingMd5/Copying/Decrypting/Done/Error），每阶段携带 `Progress(current, max, bytesPerSecond)`
+- **`JobManager`**：独立协程生命周期管理器，使用 `SupervisorJob + Dispatchers.IO`，通过 `invokeOnCompletion` 自动检测是否有活跃协程
+- **`BaseModel.jobManager`**：将协程管理从 `BaseModel._jobs` 列表迁移到 `JobManager` 实例，`launchJob`/`endJob` 委托给 JobManager
+- **`authMutex` 线程安全**：FusClient 中 `nonce`/`auth`/`sessionId` 三字段通过 `kotlinx.coroutines.sync.Mutex` 保护，`makeReqWithRetryCheck` 在整个请求过程中持有锁
+- **`Retry.kt` 通用指数退避重试**：`retryWithBackoff<T>()` 替代所有手写重试循环，支持可配置的 `maxRetries`/`initialDelay`/`maxDelay`/`retryable` 异常条件判断
+- **Phase 3 单元测试**：4 个测试文件共 117 个 JVM 测试覆盖 Request/CryptUtils/VersionFetch/DownloadStateMachine 组件
+- **测试 XML 夹具**：`binary_inform_response.xml`、`binary_init_request.xml`、`history_response.xml` 测试资源文件
+
+### Changed
+- **`Downloader.performDownload()` 拆分为 7 个阶段方法**：`buildDownloadContext()`、`writeDecryptionKey()`、`phaseBinaryInitAndDownload()`、`phaseVerifyCrc32()`、`phaseVerifyMd5()`、`phaseCopyFile()`、`phaseDecrypt()`、`phaseCleanup()`，每个方法单一职责、返回 `Result` 或 `Boolean`
+- **`DownloadContext` 不可变上下文**：在 `performDownload` 初始化阶段一次性构造，各阶段方法共享，避免重复从 model 读取字段
+- **BinaryInit + 下载重试使用 `retryWithBackoff<String?>`**：替代手写 while 循环，指数退避延迟（初始 1s，上限 10s）
+- **`FusClient.makeReq()` 使用 `retryWithBackoff<String>`**：替代手写递归 401 重试，避免 FusClientLegacy 的无限递归 bug
+- **`FusClient.getAuthV()`/`getNonce()`/`refreshNonce()`/`generateNonce()` 全部通过 `authMutex.withLock` 保护**
+- **暂停检查提取为公共函数**：`waitWhilePaused()` 扩展函数替代 4 处重复的 while+delay 代码块
+- **移除 `retryWithBackoff` Unit 重载**：JVM 签名冲突问题，所有调用处使用显式泛型参数如 `retryWithBackoff<String>(...)`
+
+### Fixed
+- **`retryWithBackoff` JVM 签名冲突**：Unit 重载与泛型重载的 JVM 签名相同，移除 Unit 重载，调用者使用显式类型参数
+- **`FusClientLegacy.generateNonceInternal` 缺参数编译错误**：`makeReqInternal(Request.GENERATE_NONCE)` 缺少 `data`/`signature`/`includeNonce` 参数，补充 `""`/`null`/`false`
+- **`FusClient`/`Downloader` 中 `retryWithBackoff` 泛型推断失败**：编译器无法推断 T，添加显式类型参数
+- **`Downloader.kt` 中暂停检查的 4 处代码重复**：提取为 `waitWhilePaused()` 公共扩展函数
+- **暂停检查不再循环在 Ktor 回调外阻塞**：`waitWhilePaused` 仅在进度回调内使用，不阻塞下载阶段切换
+
 ## [2.1.3] - 2026-07-28
 
 ### Added

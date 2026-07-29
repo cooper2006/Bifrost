@@ -546,30 +546,40 @@ object Downloader {
         model.changelog.value = null
         model.osCode.value = ""
 
-        val (fw, os, error, output) = VersionFetch.hybridGetLatestVersion(
-            model.model.value,
-            model.region.value,
-        )
+        try {
+            val (fw, os, error, output) = VersionFetch.hybridGetLatestVersion(
+                model.model.value,
+                model.region.value,
+            )
 
-        if (error != null) {
+            if (error != null) {
+                model.endJob(
+                    MR.strings.firmwareCheckError(
+                        error.message.toString(),
+                        output.replace("\t", "  ")
+                    )
+                )
+                return
+            }
+
+            model.changelog.value = ChangelogHandler.getChangelog(
+                model.model.value,
+                model.region.value,
+                fw.split("/")[0],
+            )
+
+            model.fw.value = fw
+            model.osCode.value = os
+
+            model.endJob(MR.strings.done())
+        } catch (e: Throwable) {
+            BifrostLogger.download.info("onFetch failed: ${e.javaClass.simpleName}: ${e.message}")
             model.endJob(
                 MR.strings.firmwareCheckError(
-                    error.message.toString(),
-                    output.replace("\t", "  ")
+                    e.message ?: "Unknown error",
+                    "",
                 )
             )
-            return
         }
-
-        model.changelog.value = ChangelogHandler.getChangelog(
-            model.model.value,
-            model.region.value,
-            fw.split("/")[0],
-        )
-
-        model.fw.value = fw
-        model.osCode.value = os
-
-        model.endJob(MR.strings.done())
     }
 }

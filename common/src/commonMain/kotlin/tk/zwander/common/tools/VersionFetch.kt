@@ -2,6 +2,7 @@ package tk.zwander.common.tools
 
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Document
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -47,6 +48,11 @@ object VersionFetch {
                 urlString = "https://fota-cloud-dn.ospserver.net:443/firmware/${region}/${model}/version.xml",
             ) {
                 userAgent("Kies2.0_FUS")
+                timeout {
+                    requestTimeoutMillis = 60_000L
+                    socketTimeoutMillis = 30_000L
+                    connectTimeoutMillis = 15_000L
+                }
             }
 
             val responseXml = Ksoup.parse(response.bodyAsText())

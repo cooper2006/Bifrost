@@ -189,6 +189,11 @@ object FusClient : IFusClient<FusClient.Request> {
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
+                timeout {
+                    requestTimeoutMillis = 60_000L
+                    socketTimeoutMillis = 30_000L
+                    connectTimeoutMillis = 15_000L
+                }
             }
         BifrostLogger.download.info("makeReq: response status=${response.status.value}")
 

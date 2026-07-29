@@ -20,6 +20,7 @@
 - **移除 `retryWithBackoff` Unit 重载**：JVM 签名冲突问题，所有调用处使用显式泛型参数如 `retryWithBackoff<String>(...)`
 
 ### Fixed
+- **`FusClient`/`FusClientLegacy` Mutex 死锁**：`makeReqWithRetryCheck` 持有 `authMutex` 时调用 `getAuthV()`，而 `getAuthV()` 也尝试获取同一把锁，导致协程永久挂起。将 `getAuthV` 和 `makeSignatureHash` 拆分为带锁的公开 suspend 版本（供外部调用）和无锁的内部非 suspend 版本（供 `makeReqInternal` 在已持锁状态下调用），`makeReqInternal` 改为调用内部版本避免重复加锁
 - **`retryWithBackoff` JVM 签名冲突**：Unit 重载与泛型重载的 JVM 签名相同，移除 Unit 重载，调用者使用显式类型参数
 - **`FusClientLegacy.generateNonceInternal` 缺参数编译错误**：`makeReqInternal(Request.GENERATE_NONCE)` 缺少 `data`/`signature`/`includeNonce` 参数，补充 `""`/`null`/`false`
 - **`FusClient`/`Downloader` 中 `retryWithBackoff` 泛型推断失败**：编译器无法推断 T，添加显式类型参数

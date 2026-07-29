@@ -106,6 +106,7 @@ UI (DownloadView)    DownloadModel         Downloader              Request      
 
 ## 注意事项
 
-- **authMutex 不保护下载过程本身**（大文件下载不应阻塞其他请求）。`downloadFile` 方法在开始时读取一次 auth 快照（通过 `getAuthV()` 在锁外获取），之后不再依赖 Mutex。
+- **authMutex 死锁防护**：`getAuthV` 和 `makeSignatureHash` 已拆分为带锁的公开 suspend 版本（供外部调用）和无锁的内部非 suspend 版本（`getAuthVInternal`/`makeSignatureHashInternal`）。`makeReqInternal` 在已持有 `authMutex` 的情况下必须调用内部版本，避免重复加锁导致协程永久挂起。
+- **authMutex 不保护下载过程本身**（大文件下载不应阻塞其他请求）。`downloadFile` 方法在开始时读取一次 auth 快照（通过 `getAuthV(cloud=true)` 在锁外获取），之后不再依赖 Mutex。
 - **`retryWithBackoff` 需要显式泛型参数**，因为 Kotlin 编译器无法推断 Unit 类型的 T。JVM 上的签名冲突已通过移除 Unit 重载解决，调用示例：`retryWithBackoff<String?>(...)`。
 - **`makeReq` 使用 `retryWithBackoff<String>`**，内部持有 authMutex 通过 `makeReqWithRetryCheck` 调用，确保重试期间状态一致。

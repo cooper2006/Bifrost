@@ -63,6 +63,8 @@
 - `ParallelDownloader` 添加 `@Deprecated` 标注（多线程下载速度不稳定，已改用单线程流式下载）
 - `getAuthV()` 修复变量遮蔽问题（本地 nonce 重命名为 `effectiveNonce`）
 - 连接断开异常检查排除 `FileSystemException`，避免将文件系统权限错误误判为可恢复的网络错误
+- **`FusClient.makeReqInternal` 缺少超时**：三星 FOTA 服务器不响应时，POST 请求（GenerateNonce、BinaryInform、BinaryInit）未设置 socket/connect timeout 导致 Ktor 无限挂起。现添加 60s/30s/15s 超时
+- **`Downloader.onDownload` 缺少异常处理**：`retrieveBinaryFileInfo` 或 `performDownload` 中任何未捕获的异常（如服务器无响应导致的超时）都会让 indeterminate 进度条无限旋转、永不结束。现增加 try-catch，任何异常都会调用 `endJob` 显示错误信息
 - **`FusClientLegacy.makeReq` 无限递归**：401 响应时无重试上限，现添加 `makeReqWithRetry` 限制最多 3 次重试
 - **`FusClient.downloadFile` NPE 风险**：`dest.openOutputStream(true)!!` 改为抛出带上下文的 `IOException`
 - **`DownloadModel._tempFiles` 线程安全**：改用 `synchronizedList`，`cleanupTempFiles` 在 `synchronized` 块中执行复合操作

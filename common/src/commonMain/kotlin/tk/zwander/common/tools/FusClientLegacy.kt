@@ -70,8 +70,16 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
         return authMutex.withLock {
-            "FUS nonce=\"${if (includeNonce) encNonce else ""}\", signature=\"${auth}\", nc=\"\", type=\"\", realm=\"\", newauth=\"1\""
+            getAuthVInternal(includeNonce)
         }
+    }
+
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     * 直接读取 encNonce/auth 字段，不再尝试获取锁。
+     */
+    private fun getAuthVInternal(includeNonce: Boolean): String {
+        return "FUS nonce=\"${if (includeNonce) encNonce else ""}\", signature=\"${auth}\", nc=\"\", type=\"\", realm=\"\", newauth=\"1\""
     }
 
     override suspend fun getDownloadUrl(path: String): String {
@@ -121,7 +129,7 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
             generateNonceInternal()
         }
 
-        val authV = getAuthV(includeNonce)
+        val authV = getAuthVInternal(includeNonce)
         BifrostLogger.download.info("[Legacy] makeReq: POST https://neofussvr.sslcs.cdngc.net/${request.value}, sessionId=${sessionId.take(8)}...")
 
         val response =

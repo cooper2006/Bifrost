@@ -94,28 +94,51 @@ object FusClient : IFusClient<FusClient.Request> {
         if (signature == null) return null
 
         val snapshotNonce = authMutex.withLock { nonce }
-        val hasher = CryptUtils.md5Provider.hasher()
-        val a = hasher.hash("auth:$snapshotNonce:00000001".toByteArray()).toHexString()
-        val b = hasher.hash("interface:$signature".toByteArray()).toHexString()
+        return makeSignatureHashInternal(signature, snapshotNonce)
+    }
 
-        return hasher.hash("$a:FUS:$b".toByteArray()).toHexString()
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     * 使用 hashBlocking 避免 suspend 调用（锁内不能调用 suspend）。
+     */
+    private fun makeSignatureHashInternal(signature: String, nonce: String): String {
+        val hasher = CryptUtils.md5Provider.hasher()
+        val a = hasher.hashBlocking("auth:$nonce:00000001".toByteArray()).toHexString()
+        val b = hasher.hashBlocking("interface:$signature".toByteArray()).toHexString()
+
+        return hasher.hashBlocking("$a:FUS:$b".toByteArray()).toHexString()
     }
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
-        val snapshotNonce = authMutex.withLock { nonce }
-        val snapshotAuth = authMutex.withLock { auth }
+        return authMutex.withLock {
+            getAuthVInternal(includeNonce, signature, cloud)
+        }
+    }
 
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     * 直接读取 nonce/auth 字段，不再尝试获取锁。
+     */
+    private fun getAuthVInternal(
+        includeNonce: Boolean,
+        signature: String?,
+        cloud: Boolean,
+    ): String {
         val hasSignature = !signature.isNullOrBlank()
         val effectiveNonce = when {
             includeNonce && hasSignature -> {
                 val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
                 CharArray(16) { chars.random() }.joinToString("")
             }
-            includeNonce -> snapshotNonce
+            includeNonce -> nonce
             else -> ""
         }
-        return "FUS nonce=\"${if (cloud) effectiveNonce else snapshotNonce}\", " +
-                "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: snapshotAuth}\", " +
+
+        val sigHash = signature?.takeIf { !it.isBlank() }
+            ?.let { makeSignatureHashInternal(it, nonce) } ?: auth
+
+        return "FUS nonce=\"${if (cloud) effectiveNonce else nonce}\", " +
+                "signature=\"$sigHash\", " +
                 "nc=\"${if (hasSignature) "00000001" else ""}\", " +
                 "type=\"${if (hasSignature) "auth" else ""}\", " +
                 "realm=\"${if (hasSignature) "interface" else ""}\""
@@ -175,7 +198,7 @@ object FusClient : IFusClient<FusClient.Request> {
             generateNonceInternal()
         }
 
-        val authV = getAuthV(cloud = request.cloud, signature = signature)
+        val authV = getAuthVInternal(includeNonce = true, signature = signature, cloud = request.cloud)
         val url = "https://neofussvr.sslcs.cdngc.net/${request.value}"
         BifrostLogger.download.info("makeReq: POST $url, sessionId=${sessionId.take(8)}...")
 

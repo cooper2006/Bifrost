@@ -1,20 +1,16 @@
 package tk.zwander.commonCompose.model
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import tk.zwander.common.util.BifrostSettings
-import tk.zwander.common.util.CommonLock
 import tk.zwander.common.util.SettingsKey
 
 /**
  * A model class to hold information for the various views.
+ *
+ * statusText/speed/progress 声明为 open，允许子类（如 DownloadModel）覆盖。
  */
 abstract class BaseModel(
     private val modelKey: String,
@@ -49,29 +45,24 @@ abstract class BaseModel(
     /**
      * Current status, if available.
      */
-    val statusText = MutableStateFlow("")
+    open val statusText: MutableStateFlow<String> = MutableStateFlow("")
 
     /**
      * The current speed of the operation.
      */
-    val speed = MutableStateFlow(0L)
+    open val speed: MutableStateFlow<Long> = MutableStateFlow(0L)
 
     /**
      * The current progress of the operation,
      * based on Pair(current, max).
      */
-    val progress = MutableStateFlow(0L to 0L)
+    open val progress: MutableStateFlow<Pair<Long, Long>> = MutableStateFlow(0L to 0L)
 
-    private val _jobs = MutableStateFlow(listOf<Job>())
-    private val _jobsLock = CommonLock()
+    /** 协程生命周期管理器，替换原有的内联 _jobs 管理。 */
+    val jobManager = JobManager()
 
     val hasRunningJobs: Flow<Boolean>
-        get() = _jobs.map { it.any { j -> j.isActive } }
-
-    /**
-     * A coroutine scope.
-     */
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+        get() = jobManager.hasRunningJobs
 
     protected val String.fullKey: String
         get() = "${modelKey}_$this"
@@ -81,17 +72,7 @@ abstract class BaseModel(
      * @param text the text to show in the status message.
      */
     fun endJob(text: String) {
-        val currentJobs = _jobsLock.withLock {
-            val jobs = _jobs.value
-            _jobs.value = listOf()
-            jobs
-        }
-
-        currentJobs.forEach {
-            it.cancelChildren()
-            it.cancel()
-        }
-
+        jobManager.cancelAll()
         progress.value = 0L to 0L
         speed.value = 0L
         statusText.value = text
@@ -100,11 +81,7 @@ abstract class BaseModel(
     }
 
     fun launchJob(block: suspend CoroutineScope.() -> Unit): Job {
-        val job = scope.launch(block = block)
-        _jobsLock.withLock {
-            _jobs.value = _jobs.value + job
-        }
-        return job
+        return jobManager.launch(block)
     }
 
     /**

@@ -10,13 +10,19 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.core.toByteArray
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
 import tk.zwander.common.util.globalHttpClient
+import tk.zwander.common.util.retryWithBackoff
 
 /**
- * Manage communications with Samsung's server.
+ * Manage communications with Samsung's server (legacy protocol).
+ *
+ * nonce/encNonce/auth/sessionId 的读写通过 [authMutex] 保护，
+ * 确保多协程下的 check-then-act 操作是原子的。
  */
 object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
     enum class Request(val value: String) : IFusClient.IRequest {
@@ -25,28 +31,34 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
         BINARY_INIT("NF_DownloadBinaryInitForMass.do")
     }
 
+    private val authMutex = Mutex()
+
     private var encNonce = ""
     private var nonce = ""
-
     private var auth: String = ""
     private var sessionId: String = ""
 
-    override suspend fun getNonce(): String {
+    override suspend fun getNonce(): String = authMutex.withLock {
         if (nonce.isBlank()) {
-            generateNonce()
+            generateNonceInternal()
         }
-
-        return nonce
+        nonce
     }
 
     override suspend fun generateNonce() {
+        authMutex.withLock {
+            generateNonceInternal()
+        }
+    }
+
+    private suspend fun generateNonceInternal() {
         BugsnagUtils.addBreadcrumb(
             message = "Generating nonce.",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
         BifrostLogger.general.info("Generating nonce.")
-        makeReq(Request.GENERATE_NONCE)
+        makeReqInternal(Request.GENERATE_NONCE, "", null, false)
         BugsnagUtils.addBreadcrumb(
             message = "Nonce: $nonce, Auth: $auth",
             data = mapOf(),
@@ -57,7 +69,9 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
     }
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
-        return "FUS nonce=\"${if (includeNonce) encNonce else ""}\", signature=\"${this.auth}\", nc=\"\", type=\"\", realm=\"\", newauth=\"1\""
+        return authMutex.withLock {
+            "FUS nonce=\"${if (includeNonce) encNonce else ""}\", signature=\"${auth}\", nc=\"\", type=\"\", realm=\"\", newauth=\"1\""
+        }
     }
 
     override suspend fun getDownloadUrl(path: String): String {
@@ -66,26 +80,43 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
 
     /**
      * Make a request to Samsung, automatically inserting authorization data.
-     * @param request the request to make.
-     * @param data any body data that needs to go into the request.
-     * @return the response body data, as text. Usually XML.
+     * 使用 retryWithBackoff 处理 401 重试。
      */
     override suspend fun makeReq(
         request: Request,
         data: String,
         signature: String?,
         includeNonce: Boolean,
-    ): String = makeReqWithRetry(request, data, signature, includeNonce, retryCount = 0)
+    ): String = retryWithBackoff<String>(
+        maxRetries = 3,
+        initialDelay = 500L,
+        retryable = { e ->
+            e is RuntimeException && e.message?.contains("认证持续失败") == true
+        },
+    ) {
+        makeReqWithRetryCheck(request, data, signature, includeNonce)
+    }
 
-    private suspend fun makeReqWithRetry(
+    private suspend fun makeReqWithRetryCheck(
         request: Request,
         data: String,
         signature: String?,
         includeNonce: Boolean,
-        retryCount: Int,
+    ): String = authMutex.withLock {
+        makeReqInternal(request, data, signature, includeNonce)
+    }
+
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     */
+    private suspend fun makeReqInternal(
+        request: Request,
+        data: String,
+        signature: String?,
+        includeNonce: Boolean,
     ): String {
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
-            generateNonce()
+            generateNonceInternal()
         }
 
         val authV = getAuthV(includeNonce)
@@ -108,13 +139,8 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
         BifrostLogger.download.debug("Request: $request")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
-            // 限制重试次数上限，避免 401 持续返回时无限递归导致栈溢出
-            if (retryCount >= 3) {
-                throw RuntimeException("认证持续失败（重试 $retryCount 次后仍为 401）")
-            }
-            generateNonce()
-
-            return makeReqWithRetry(request = request, data = data, signature = signature, includeNonce = includeNonce, retryCount = retryCount + 1)
+            generateNonceInternal()
+            throw RuntimeException("认证持续失败（重试后仍为 401）")
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {

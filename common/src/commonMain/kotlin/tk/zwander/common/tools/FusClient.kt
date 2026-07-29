@@ -22,13 +22,20 @@ import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.core.toByteArray
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import tk.zwander.common.util.BreadcrumbType
 import tk.zwander.common.util.BugsnagUtils
 import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.globalHttpClient
+import tk.zwander.common.util.retryWithBackoff
 
 /**
  * 管理与三星服务器的通信。
+ *
+ * nonce/auth/sessionId 的读写通过 [authMutex] 保护，确保 check-then-act 操作是原子的。
+ * downloadFile 方法不持有 authMutex（大文件下载不应阻塞其他请求），
+ * 但下载开始时读取 auth 值是通过 getAuthV() 在锁外获取的快照值。
  */
 object FusClient : IFusClient<FusClient.Request> {
     enum class Request(val value: String, val cloud: Boolean) : IFusClient.IRequest {
@@ -38,36 +45,42 @@ object FusClient : IFusClient<FusClient.Request> {
         HISTORY("SmartHistory.do", false),
     }
 
-    // @Volatile: 这些字段从协程中访问，可能在不同线程上运行。
-    // @Volatile 确保跨线程可见性，但复合操作（如 check-then-act）仍需调用方保证顺序。
-    @Volatile
-    private var nonce = ""
+    private val authMutex = Mutex()
 
-    @Volatile
+    private var nonce = ""
     private var auth: String = ""
-    @Volatile
     private var sessionId: String = ""
 
-    override suspend fun getNonce(): String {
+    override suspend fun getNonce(): String = authMutex.withLock {
         if (nonce.isBlank()) {
-            generateNonce()
+            generateNonceInternal()
         }
-
-        return nonce
+        nonce
     }
 
     suspend fun refreshNonce() {
-        generateNonce()
+        authMutex.withLock {
+            generateNonceInternal()
+        }
     }
 
     override suspend fun generateNonce() {
+        authMutex.withLock {
+            generateNonceInternal()
+        }
+    }
+
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     */
+    private suspend fun generateNonceInternal() {
         BugsnagUtils.addBreadcrumb(
             message = "生成随机数。",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
         BifrostLogger.general.info("生成随机数。")
-        makeReq(Request.GENERATE_NONCE, "", null, true)
+        makeReqInternal(Request.GENERATE_NONCE, "", null, true)
         BugsnagUtils.addBreadcrumb(
             message = "随机数: $nonce, 认证: $auth",
             data = mapOf(),
@@ -80,25 +93,29 @@ object FusClient : IFusClient<FusClient.Request> {
     private suspend fun makeSignatureHash(signature: String?): String? {
         if (signature == null) return null
 
+        val snapshotNonce = authMutex.withLock { nonce }
         val hasher = CryptUtils.md5Provider.hasher()
-        val a = hasher.hash("auth:$nonce:00000001".toByteArray()).toHexString()
+        val a = hasher.hash("auth:$snapshotNonce:00000001".toByteArray()).toHexString()
         val b = hasher.hash("interface:$signature".toByteArray()).toHexString()
 
         return hasher.hash("$a:FUS:$b".toByteArray()).toHexString()
     }
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
+        val snapshotNonce = authMutex.withLock { nonce }
+        val snapshotAuth = authMutex.withLock { auth }
+
         val hasSignature = !signature.isNullOrBlank()
         val effectiveNonce = when {
             includeNonce && hasSignature -> {
                 val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
                 CharArray(16) { chars.random() }.joinToString("")
             }
-            includeNonce -> nonce
+            includeNonce -> snapshotNonce
             else -> ""
         }
-        return "FUS nonce=\"${if (cloud) effectiveNonce else this.nonce}\", " +
-                "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: this.auth}\", " +
+        return "FUS nonce=\"${if (cloud) effectiveNonce else snapshotNonce}\", " +
+                "signature=\"${makeSignatureHash(signature?.takeIf { !it.isBlank() }) ?: snapshotAuth}\", " +
                 "nc=\"${if (hasSignature) "00000001" else ""}\", " +
                 "type=\"${if (hasSignature) "auth" else ""}\", " +
                 "realm=\"${if (hasSignature) "interface" else ""}\""
@@ -112,22 +129,50 @@ object FusClient : IFusClient<FusClient.Request> {
 
     /**
      * 向三星发送请求，自动插入授权数据。
-     * @param request 要发送的请求。
-     * @param data 需要放入请求中的任何正文数据。
-     * @return 响应正文数据，作为文本。通常是XML。
+     * 使用 retryWithBackoff 处理 401 重试，而非手写递归。
      */
     override suspend fun makeReq(
         request: Request,
         data: String,
         signature: String?,
         includeNonce: Boolean,
-    ): String = makeReqWithRetry(request, data, signature, includeNonce, retryCount = 0)
+    ): String = retryWithBackoff<String>(
+        maxRetries = 3,
+        initialDelay = 500L,
+        retryable = { e ->
+            // 只有 401 相关的异常才重试
+            e is RuntimeException && e.message?.contains("认证持续失败") == true
+        },
+    ) {
+        makeReqWithRetryCheck(request, data, signature, includeNonce)
+    }
 
-    private suspend fun makeReqWithRetry(request: Request, data: String, signature: String?, includeNonce: Boolean, retryCount: Int): String {
-        BifrostLogger.download.info("makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}, retry=$retryCount")
+    /**
+     * 执行一次请求，如果收到 401 则抛出异常让 retryWithBackoff 处理。
+     * 内部持有 [authMutex] 保护状态读写。
+     */
+    private suspend fun makeReqWithRetryCheck(
+        request: Request,
+        data: String,
+        signature: String?,
+        includeNonce: Boolean,
+    ): String = authMutex.withLock {
+        makeReqInternal(request, data, signature, includeNonce)
+    }
+
+    /**
+     * 内部方法：调用方必须持有 [authMutex]。
+     */
+    private suspend fun makeReqInternal(
+        request: Request,
+        data: String,
+        signature: String?,
+        includeNonce: Boolean,
+    ): String {
+        BifrostLogger.download.info("makeReq start: request=${request.value}, cloud=${request.cloud}, dataLen=${data.length}, hasSig=${signature != null}")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
             BifrostLogger.download.info("makeReq: nonce blank, generating...")
-            generateNonce()
+            generateNonceInternal()
         }
 
         val authV = getAuthV(cloud = request.cloud, signature = signature)
@@ -151,14 +196,9 @@ object FusClient : IFusClient<FusClient.Request> {
         BifrostLogger.download.info("makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
         if (request != Request.GENERATE_NONCE && response.is401(body)) {
-            if (retryCount >= 3) {
-                BifrostLogger.download.info("makeReq: 401 after $retryCount retries, giving up")
-                throw RuntimeException("认证持续失败（重试 $retryCount 次后仍为 401）")
-            }
-            BifrostLogger.download.info("makeReq: got 401, regenerating nonce and retrying (${retryCount + 1}/3)")
-            generateNonce()
-
-            return makeReqWithRetry(request, data, signature, includeNonce, retryCount + 1)
+            BifrostLogger.download.info("makeReq: got 401, regenerating nonce")
+            generateNonceInternal()
+            throw RuntimeException("认证持续失败（重试后仍为 401）")
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {
@@ -219,13 +259,12 @@ object FusClient : IFusClient<FusClient.Request> {
         val url = getDownloadUrl(fileName)
         BifrostLogger.download.info("downloadFile: url=$url")
 
-        // 单线程 Ktor 流式下载，不经过 Ketch（Ketch 内部会先发 HEAD 消耗 auth）
         BifrostLogger.download.info("downloadFile: using Ktor single-thread streaming mode, size=${size / (1024 * 1024)}MB")
 
         val maxAuthRetries = 3
         var authRetries = 0
         var downloadedBytes = start
-        val buffer = ByteArray(64 * 1024) // 64KB buffer
+        val buffer = ByteArray(64 * 1024)
         val startTime = System.currentTimeMillis()
 
         while (true) {
@@ -245,7 +284,7 @@ object FusClient : IFusClient<FusClient.Request> {
                     }
                     timeout {
                         requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                        socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
+                        socketTimeoutMillis = 60_000L
                         connectTimeoutMillis = 30_000L
                     }
                 }.execute { response ->
@@ -277,13 +316,11 @@ object FusClient : IFusClient<FusClient.Request> {
                             val elapsed = (now - startTime) / 1000.0
                             val bps = if (elapsed > 0) (downloadedBytes / elapsed).toLong() else 0L
 
-                            // 进度回调节流，每 500ms 触发一次
                             if (now - lastProgressTime > 500) {
                                 progressCallback(downloadedBytes, size, bps)
                                 lastProgressTime = now
                             }
 
-                            // 每 5 秒打印一次下载进度日志
                             if (now - lastLogTime > 5000) {
                                 val pct = if (size > 0) String.format("%.1f", downloadedBytes * 100.0 / size) else "0"
                                 BifrostLogger.download.info("progress: ${downloadedBytes / (1024 * 1024)}MB / ${size / (1024 * 1024)}MB ($pct%), bps=${bps / 1024}KB/s")
@@ -295,7 +332,6 @@ object FusClient : IFusClient<FusClient.Request> {
                         outputStream.close()
                     }
 
-                    // 最终进度回调
                     val elapsedTotal = (System.currentTimeMillis() - startTime) / 1000.0
                     val bps = if (elapsedTotal > 0) (downloadedBytes / elapsedTotal).toLong() else 0L
                     progressCallback(downloadedBytes, size, bps)

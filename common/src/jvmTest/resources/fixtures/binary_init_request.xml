@@ -1,0 +1,17 @@
+<FUSMsg>
+  <FUSHdr>
+    <ProtoVer>1</ProtoVer>
+    <SessionID>0</SessionID>
+    <MsgID>1</MsgID>
+  </FUSHdr>
+  <FUSBody>
+    <Put>
+      <BINARY_NAME><Data>SM-S936U_3_20260602213641_cpeelkz6q8_fac.zip.enc4</Data></BINARY_NAME>
+      <BINARY_SW_VERSION><Data>S936USQUACZF1/S936UOYNACZF1/S936USQUACZF1/S936USQUACZF1</Data></BINARY_SW_VERSION>
+      <DEVICE_LOCAL_CODE><Data>XAA</Data></DEVICE_LOCAL_CODE>
+      <DEVICE_MODEL_TYPE><Data>9</Data></DEVICE_MODEL_TYPE>
+      <LOGIC_CHECK><Data/>
+      </LOGIC_CHECK>
+    </Put>
+  </FUSBody>
+</FUSMsg>

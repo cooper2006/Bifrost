@@ -2,8 +2,8 @@ package tk.zwander.commonCompose.model
 
 import dev.zwander.kotlin.file.IPlatformFile
 import kotlinx.coroutines.flow.MutableStateFlow
-import tk.zwander.common.data.ChunkState
-import tk.zwander.common.data.DownloadState
+import tk.zwander.common.data.DownloadPhase
+import tk.zwander.common.data.DownloadStateMachine
 import tk.zwander.common.data.changelog.Changelog
 import tk.zwander.common.util.BifrostSettings
 import tk.zwander.common.util.SettingsKey
@@ -15,6 +15,27 @@ class DownloadModel : BaseModel("download_model") {
     companion object {
         private const val MANUAL_KEY = "field_manual"
     }
+
+    /** 下载状态机，替代原有的 progress/speed/statusText 三字段方案。 */
+    val stateMachine = DownloadStateMachine()
+
+    /**
+     * 桥接：从状态机映射 statusText 给旧代码使用。
+     * 新代码应直接使用 stateMachine.state。
+     */
+    override val statusText: MutableStateFlow<String> = MutableStateFlow("")
+
+    /**
+     * 桥接：从状态机映射 speed 给旧代码使用。
+     * 新代码应直接使用 stateMachine.state。
+     */
+    override val speed: MutableStateFlow<Long> = MutableStateFlow(0L)
+
+    /**
+     * 桥接：从状态机映射 progress 给旧代码使用。
+     * 新代码应直接使用 stateMachine.state。
+     */
+    override val progress: MutableStateFlow<Pair<Long, Long>> = MutableStateFlow(0L to 0L)
 
     /**
      * Whether the user is manually inputting firmware.
@@ -45,7 +66,7 @@ class DownloadModel : BaseModel("download_model") {
     /**
      * Current download state for chunk progress tracking.
      */
-    val downloadState = MutableStateFlow<DownloadState?>(null)
+    val downloadState = MutableStateFlow<tk.zwander.common.data.DownloadState?>(null)
 
     /**
      * Total number of chunks.

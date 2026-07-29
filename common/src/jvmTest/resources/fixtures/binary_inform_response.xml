@@ -1,0 +1,25 @@
+<FUSMsg>
+  <FUSHdr>
+    <ProtoVer>1</ProtoVer>
+    <SessionID>0</SessionID>
+    <MsgID>1</MsgID>
+  </FUSHdr>
+  <FUSBody>
+    <Results>
+      <Status>200</Status>
+    </Results>
+    <Put>
+      <MODEL_PATH><Data>/neofus/911/</Data></MODEL_PATH>
+      <BINARY_BYTE_SIZE><Data>18455490816</Data></BINARY_BYTE_SIZE>
+      <BINARY_NAME><Data>SM-S936U_3_20260602213641_cpeelkz6q8_fac.zip.enc4</Data></BINARY_NAME>
+      <BINARY_CRC><Data>1907214658</Data></BINARY_CRC>
+      <BINARY_NATURE><Data>1</Data></BINARY_NATURE>
+      <BINARY_SW_VERSION><Data>S936USQUACZF1</Data></BINARY_SW_VERSION>
+      <LOGIC_VALUE_FACTORY><Data>ly5sdp7cs1z3ed1x</Data></LOGIC_VALUE_FACTORY>
+      <DEVICE_MODEL_TYPE><Data>9</Data></DEVICE_MODEL_TYPE>
+      <DEVICE_PDA_CODE1_FILE><Data>S936USQUACZF1_1234</Data></DEVICE_PDA_CODE1_FILE>
+      <DEVICE_CSC_FILE><Data>S936UOYNACZF1_5678</Data></DEVICE_CSC_FILE>
+      <DEVICE_PHONE_FONT_FILE><Data>S936USQUACZF1_9012</Data></DEVICE_PHONE_FONT_FILE>
+    </Put>
+  </FUSBody>
+</FUSMsg>

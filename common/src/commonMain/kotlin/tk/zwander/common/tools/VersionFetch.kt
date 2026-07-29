@@ -10,6 +10,7 @@ import org.redundent.kotlin.xml.PrintOptions
 import org.redundent.kotlin.xml.xml
 import tk.zwander.common.data.FetchResult
 import tk.zwander.common.data.SmartBinaryInfo
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.dataNode
 import tk.zwander.common.util.firstDataElementDataByTagName
 import tk.zwander.common.util.globalHttpClient
@@ -23,10 +24,13 @@ import tk.zwander.samloaderkotlin.resources.MR
  */
 object VersionFetch {
     suspend fun hybridGetLatestVersion(model: String, region: String): FetchResult.VersionFetchResult {
+        BifrostLogger.download.info("VersionFetch.hybridGetLatestVersion: model=$model, region=$region")
         val smartDocument = performHistoryRequest(model, region)
         val history = parseHistoryInfos(smartDocument)
+        BifrostLogger.download.info("VersionFetch: history count=${history.size}")
 
         if (history.isNotEmpty()) {
+            BifrostLogger.download.info("VersionFetch: returning history result, fw=${history.last().swVersion}")
             return FetchResult.VersionFetchResult(
                 versionCode = history.last().swVersion,
                 androidVersion = history.last().osName ?: "",
@@ -34,6 +38,7 @@ object VersionFetch {
             )
         }
 
+        BifrostLogger.download.info("VersionFetch: history empty, falling back to getLatestVersion")
         return getLatestVersion(model, region)
     }
 
@@ -43,6 +48,7 @@ object VersionFetch {
      * @param region the device region.
      */
     suspend fun getLatestVersion(model: String, region: String): FetchResult.VersionFetchResult {
+        BifrostLogger.download.info("VersionFetch.getLatestVersion: GET https://fota-cloud-dn.ospserver.net:443/firmware/${region}/${model}/version.xml")
         try {
             val response = globalHttpClient.get(
                 urlString = "https://fota-cloud-dn.ospserver.net:443/firmware/${region}/${model}/version.xml",
@@ -54,6 +60,7 @@ object VersionFetch {
                     connectTimeoutMillis = 15_000L
                 }
             }
+            BifrostLogger.download.info("VersionFetch.getLatestVersion: response status=${response.status.value}")
 
             val responseXml = Ksoup.parse(response.bodyAsText())
 
@@ -156,13 +163,16 @@ object VersionFetch {
         model: String,
         region: String,
     ): Document {
+        BifrostLogger.download.info("VersionFetch.performHistoryRequest: model=$model, region=$region")
         val requestContent = createHistoryRequest(model, region)
+        BifrostLogger.download.info("VersionFetch.performHistoryRequest: request content length=${requestContent.length}")
 
         val response = IFusClient.selectClientAndMakeRequest(
             request = FusClient.Request.HISTORY,
             data = requestContent,
             signature = model,
         )
+        BifrostLogger.download.info("VersionFetch.performHistoryRequest: response length=${response.length}")
 
         return Ksoup.parse(response)
     }

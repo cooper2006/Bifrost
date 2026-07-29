@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import tk.zwander.common.data.BinaryFileInfo
 import tk.zwander.common.data.DownloadPhase
 import tk.zwander.common.data.Progress
@@ -542,17 +543,23 @@ object Downloader {
     }
 
     suspend fun onFetch(model: DownloadModel) {
+        BifrostLogger.download.info("onFetch START: model=${model.model.value}, region=${model.region.value}")
         model.statusText.value = ""
         model.changelog.value = null
         model.osCode.value = ""
 
         try {
-            val (fw, os, error, output) = VersionFetch.hybridGetLatestVersion(
-                model.model.value,
-                model.region.value,
-            )
+            BifrostLogger.download.info("onFetch: calling hybridGetLatestVersion with 120s timeout")
+            val (fw, os, error, output) = withTimeout(120_000L) {
+                VersionFetch.hybridGetLatestVersion(
+                    model.model.value,
+                    model.region.value,
+                )
+            }
+            BifrostLogger.download.info("onFetch: hybridGetLatestVersion returned, error=${error != null}, fw=$fw")
 
             if (error != null) {
+                BifrostLogger.download.warn("onFetch: server returned error: ${error.message}")
                 model.endJob(
                     MR.strings.firmwareCheckError(
                         error.message.toString(),
@@ -562,18 +569,29 @@ object Downloader {
                 return
             }
 
+            BifrostLogger.download.info("onFetch: fetching changelog for $fw")
             model.changelog.value = ChangelogHandler.getChangelog(
                 model.model.value,
                 model.region.value,
                 fw.split("/")[0],
             )
+            BifrostLogger.download.info("onFetch: changelog fetched")
 
             model.fw.value = fw
             model.osCode.value = os
 
             model.endJob(MR.strings.done())
+            BifrostLogger.download.info("onFetch SUCCESS")
+        } catch (e: CancellationException) {
+            BifrostLogger.download.info("onFetch cancelled (timeout or user cancel)")
+            model.endJob(
+                MR.strings.firmwareCheckError(
+                    "Request timed out or was cancelled",
+                    "",
+                )
+            )
         } catch (e: Throwable) {
-            BifrostLogger.download.info("onFetch failed: ${e.javaClass.simpleName}: ${e.message}")
+            BifrostLogger.download.error("onFetch FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
             model.endJob(
                 MR.strings.firmwareCheckError(
                     e.message ?: "Unknown error",

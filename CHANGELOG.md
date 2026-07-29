@@ -25,6 +25,9 @@
 - **`FusClient`/`Downloader` 中 `retryWithBackoff` 泛型推断失败**：编译器无法推断 T，添加显式类型参数
 - **`Downloader.kt` 中暂停检查的 4 处代码重复**：提取为 `waitWhilePaused()` 公共扩展函数
 - **暂停检查不再循环在 Ktor 回调外阻塞**：`waitWhilePaused` 仅在进度回调内使用，不阻塞下载阶段切换
+- **`FusClientLegacy.makeReqInternal` 缺失超时**：架构改进时遗漏，现补充 60s/30s/15s 超时，与 `FusClient` 保持一致
+- **`Downloader.onFetch` 缺少外层超时保护**：添加 `withTimeout(120s)` 作为 Ktor 超时的双重保险，防止三星服务器无响应时进度条无限旋转
+- **`JobManager.cancelAll` 增加调试日志**：记录取消的 Job 数量和状态变化，便于排查进度条不消失的问题
 
 ## [2.1.3] - 2026-07-28
 

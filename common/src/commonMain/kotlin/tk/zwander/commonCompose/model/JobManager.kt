@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import tk.zwander.common.util.BifrostLogger
 
 /**
  * 管理协程生命周期的工具类。
@@ -27,10 +28,13 @@ class JobManager {
      * @return 启动的 Job 引用
      */
     fun launch(block: suspend CoroutineScope.() -> Unit): Job {
+        BifrostLogger.general.info("JobManager.launch: starting new job")
         val job = scope.launch(block = block)
         _hasRunningJobs.value = true
-        job.invokeOnCompletion {
-            _hasRunningJobs.value = scope.coroutineContext[Job]?.children?.any { it.isActive } == true
+        job.invokeOnCompletion { cause ->
+            val activeCount = scope.coroutineContext[Job]?.children?.count { it.isActive } ?: 0
+            BifrostLogger.general.info("JobManager.invokeOnCompletion: cause=$cause, remaining active jobs=$activeCount")
+            _hasRunningJobs.value = activeCount > 0
         }
         return job
     }
@@ -39,14 +43,18 @@ class JobManager {
      * 取消所有正在运行的协程。
      */
     fun cancelAll() {
-        scope.coroutineContext[Job]?.children?.forEach { it.cancel() }
+        val children = scope.coroutineContext[Job]?.children?.toList()
+        BifrostLogger.general.info("JobManager.cancelAll: cancelling ${children?.size ?: 0} jobs")
+        children?.forEach { it.cancel() }
         _hasRunningJobs.value = false
+        BifrostLogger.general.info("JobManager.cancelAll: hasRunningJobs set to false")
     }
 
     /**
      * 取消指定 Job。
      */
     fun cancel(job: Job) {
+        BifrostLogger.general.info("JobManager.cancel: cancelling single job")
         job.cancel()
     }
 }

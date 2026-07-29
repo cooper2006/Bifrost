@@ -218,6 +218,7 @@ interface IFusClient<Request : IFusClient.IRequest> {
             signature: String? = null,
             includeNonce: Boolean = true,
         ): String {
+            BifrostLogger.download.info("IFusClient.selectClientAndMakeRequest: request=$request, dataLen=${data.length}, hasSig=${signature != null}")
             return when (request) {
                 is FusClient.Request -> FusClient.makeReq(
                     request = request,
@@ -231,6 +232,8 @@ interface IFusClient<Request : IFusClient.IRequest> {
                     signature = signature,
                     includeNonce = includeNonce,
                 )
+            }.also {
+                BifrostLogger.download.info("IFusClient.selectClientAndMakeRequest: done, response length=${it.length}")
             }
         }
 

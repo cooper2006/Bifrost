@@ -3,6 +3,7 @@
 package tk.zwander.common.tools
 
 import com.fleeksoft.io.exception.ArrayIndexOutOfBoundsException
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.headers
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -57,15 +58,14 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        BifrostLogger.general.info("Generating nonce.")
+        BifrostLogger.general.info("[Legacy] Generating nonce.")
         makeReqInternal(Request.GENERATE_NONCE, "", null, false)
         BugsnagUtils.addBreadcrumb(
             message = "Nonce: $nonce, Auth: $auth",
             data = mapOf(),
             type = BreadcrumbType.LOG,
         )
-        BifrostLogger.general.debug("Nonce: $nonce")
-        BifrostLogger.general.debug("Auth: $auth")
+        BifrostLogger.general.info("[Legacy] Nonce generated: ${nonce.take(8)}..., Auth: ${auth.take(8)}...")
     }
 
     override suspend fun getAuthV(includeNonce: Boolean, signature: String?, cloud: Boolean): String {
@@ -115,11 +115,14 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
         signature: String?,
         includeNonce: Boolean,
     ): String {
+        BifrostLogger.download.info("[Legacy] makeReq start: request=${request.value}, dataLen=${data.length}, hasSig=${signature != null}")
         if (nonce.isBlank() && request != Request.GENERATE_NONCE) {
+            BifrostLogger.download.info("[Legacy] makeReq: nonce blank, generating...")
             generateNonceInternal()
         }
 
         val authV = getAuthV(includeNonce)
+        BifrostLogger.download.info("[Legacy] makeReq: POST https://neofussvr.sslcs.cdngc.net/${request.value}, sessionId=${sessionId.take(8)}...")
 
         val response =
             globalHttpClient.request("https://neofussvr.sslcs.cdngc.net/${request.value}") {
@@ -132,9 +135,15 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
                     append(HttpHeaders.ContentLength, "${data.toByteArray().size}")
                 }
                 setBody(data)
+                timeout {
+                    requestTimeoutMillis = 60_000L
+                    socketTimeoutMillis = 30_000L
+                    connectTimeoutMillis = 15_000L
+                }
             }
 
         val body = response.bodyAsText()
+        BifrostLogger.download.info("[Legacy] makeReq: response status=${response.status.value}, body length=${body.length}")
 
         BifrostLogger.download.debug("Request: $request")
 

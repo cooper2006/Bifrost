@@ -48,6 +48,40 @@ tasks.withType<org.gradle.jvm.tasks.Jar> {
     exclude("META-INF/*.RSA", "META-INF/*.DSA", "META-INF/*.SF")
 }
 
+// ── 自定义 DMG 打包 ────────────────────────────────────────────────
+// jpackage 内部调用 hdiutil 时硬编码 -fs HFS+，而 macOS 10.14+ 已
+// 弃用 HFS+ 创建，在新系统上直接失败。此 Task 改用 hdiutil create
+// -format UDZO（APFS），绕开 jpackage 的 DMG 步骤，稳定可靠。
+// 用法：./gradlew :desktop:createDmg
+// 可替代 packageDmg：./gradlew :desktop:createDistributable :desktop:createDmg
+// ───────────────────────────────────────────────────────────────────
+tasks.register<Exec>("createDmg") {
+    description = "使用 hdiutil (UDZO/APFS) 创建 DMG，避免 jpackage 的 HFS+ 兼容问题"
+    group = "distribution"
+    dependsOn("createDistributable")
+
+    val appNameVal = rootProject.extra["appName"].toString()
+    val versionNameVal = rootProject.extra["versionName"].toString()
+    val appDir = layout.buildDirectory.dir("compose/binaries/main/app/${appNameVal}.app")
+    val dmgDir = layout.buildDirectory.dir("compose/binaries/main/dmg")
+    val outputFile = layout.buildDirectory.file("compose/binaries/main/dmg/${appNameVal}-${versionNameVal}.dmg")
+
+    inputs.dir(appDir)
+    outputs.file(outputFile)
+
+    doFirst {
+        dmgDir.get().asFile.mkdirs()
+        outputFile.get().asFile.delete()
+    }
+    commandLine(
+        "hdiutil", "create",
+        "-format", "UDZO",
+        "-srcfolder", appDir.get().asFile.absolutePath,
+        "-volname", appNameVal,
+        outputFile.get().asFile.absolutePath,
+    )
+}
+
 tasks.withType<ComposeHotRun>().configureEach {
     mainClass.set("MainKt")
     // Skiko tries to create a lock file in ~/.skiko/, which may fail under

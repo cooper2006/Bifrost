@@ -154,7 +154,7 @@ compose.desktop {
                 bundleID = packageName
                 iconFile.set(project.file("src/jvmMain/resources/icon.icns"))
                 packageVersion = rootProject.extra["versionName"].toString()
-                targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
+                targetFormats(TargetFormat.Pkg)
                 this.packageName = appName
 
                 signing {
@@ -184,7 +184,7 @@ compose.desktop {
                 targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             }
 
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Exe)
+            targetFormats(TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Exe)
             this.packageName = appName
         }
     }

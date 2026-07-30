@@ -69,16 +69,15 @@ tasks.register<Exec>("createDmg") {
     inputs.dir(appDir)
     outputs.file(outputFile)
 
-    doFirst {
-        dmgDir.get().asFile.mkdirs()
-        outputFile.get().asFile.delete()
-    }
+    // 用 shell 串联 rm + hdiutil，确保旧文件先被清理
     commandLine(
-        "hdiutil", "create",
-        "-format", "UDZO",
-        "-srcfolder", appDir.get().asFile.absolutePath,
-        "-volname", appNameVal,
-        outputFile.get().asFile.absolutePath,
+        "bash", "-c",
+        "mkdir -p ${dmgDir.get().asFile.absolutePath} && " +
+        "rm -f ${outputFile.get().asFile.absolutePath} && " +
+        "hdiutil create -format UDZO -ov " +
+        "-srcfolder ${appDir.get().asFile.absolutePath} " +
+        "-volname ${appNameVal} " +
+        "${outputFile.get().asFile.absolutePath}"
     )
 }
 

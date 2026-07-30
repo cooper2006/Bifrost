@@ -77,8 +77,14 @@ abstract class BaseModel(
         speed.value = 0L
         statusText.value = text
 
+        resetState()
         onEnd(text)
     }
+
+    /**
+     * 重置模型状态。子类应覆盖此方法以重置自定义状态（如状态机）。
+     */
+    protected open fun resetState() {}
 
     fun launchJob(block: suspend CoroutineScope.() -> Unit): Job {
         return jobManager.launch(block)

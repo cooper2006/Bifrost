@@ -235,7 +235,10 @@ object FusClient : IFusClient<FusClient.Request> {
 
                 try {
                     auth = CryptUtils.decryptNonce(nonce.take(16).padEnd(16, '0'))
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    BifrostLogger.general.warn("Failed to decrypt nonce, clearing auth to avoid mismatch", e)
+                    auth = ""
+                }
             } catch (e: ArrayIndexOutOfBoundsException) {
                 BugsnagUtils.addBreadcrumb(
                     message = "生成随机数时出错。",
@@ -282,6 +285,7 @@ object FusClient : IFusClient<FusClient.Request> {
         dest: IPlatformFile,
         onAuthRefresh: (suspend () -> Unit)? = null,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
+        pauseCheck: (suspend () -> Unit)? = null,
     ): String? {
         BifrostLogger.download.info("downloadFile start: fileName=$fileName, start=$start, size=${size}bytes (${size / (1024 * 1024)}MB), dest=${dest.getAbsolutePath()}")
         val url = getDownloadUrl(fileName)

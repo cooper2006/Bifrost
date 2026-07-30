@@ -84,7 +84,7 @@ interface IFusClient<Request : IFusClient.IRequest> {
                 ),
             )
 
-            CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO) {
+            val progressJob = CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO) {
                 task.state.collect {
                     if (it is DownloadState.Downloading) {
                         progressCallback(
@@ -97,21 +97,26 @@ interface IFusClient<Request : IFusClient.IRequest> {
             }
 
             try {
-                while (true) {
+                var retryCount = 0
+                val maxKetchRetries = 3
+                while (retryCount < maxKetchRetries) {
                     val result = task.await()
 
                     if (result.isSuccess) {
                         break
                     }
 
-                    (result.exceptionOrNull() as? KetchError)?.let { error ->
-                        if (!error.isRetryable) {
-                            break
-                        }
+                    val error = result.exceptionOrNull() as? KetchError
+                    if (error == null || !error.isRetryable) {
+                        break
                     }
+                    retryCount++
+                    BifrostLogger.download.warn("Ketch download failed (retry $retryCount/$maxKetchRetries): ${error.message}")
                 }
             } catch (_: CancellationException) {
                 task.pause()
+            } finally {
+                progressJob.cancel()
             }
 
             null

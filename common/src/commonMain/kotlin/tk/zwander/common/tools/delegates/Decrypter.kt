@@ -36,8 +36,8 @@ object Decrypter {
                     ).first
                 }
                 else -> {
-                    try {
-                        val binaryFileInfo = Request.retrieveBinaryFileInfo(
+                    val binaryFileInfo = try {
+                        Request.retrieveBinaryFileInfo(
                             fw = model.fw.value,
                             model = model.model.value,
                             region = model.region.value,
@@ -58,55 +58,70 @@ object Decrypter {
                             },
                             legacy = true,
                         )
-
-                        if (binaryFileInfo != null) {
-                            binaryFileInfo.v4Key?.keyBytes ?: run {
-                                BifrostLogger.decrypt.info("onDecrypt: v4Key missing from binary info")
-                                model.endJob(MR.strings.decryptError("无法获取解密密钥，请检查型号和区域是否正确。"))
-                                eventManager.sendEvent(Event.Decrypt.Finish)
-                                return
-                            }
-                        } else {
-                            return
-                        }
-                    } catch (e: Throwable) {
+                    } catch (e: Exception) {
                         BifrostLogger.decrypt.error("Unable to retrieve v4 key ${e.message}.")
                         model.endJob(MR.strings.decryptError(e.message.toString()))
+                        eventManager.sendEvent(Event.Decrypt.Finish)
+                        return
+                    }
+
+                    if (binaryFileInfo == null) {
+                        BifrostLogger.decrypt.info("onDecrypt: binaryFileInfo is null after both attempts")
+                        model.endJob(MR.strings.decryptError("No decryption key available"))
+                        eventManager.sendEvent(Event.Decrypt.Finish)
+                        return
+                    }
+
+                    binaryFileInfo.v4Key?.keyBytes?.takeIf { it.isNotEmpty() } ?: run {
+                        BifrostLogger.decrypt.info("onDecrypt: v4Key missing or empty from binary info")
+                        model.endJob(MR.strings.decryptError("No decryption key available"))
+                        eventManager.sendEvent(Event.Decrypt.Finish)
                         return
                     }
                 }
             }
 
             val inputStream = try {
-                inputFile.openInputStream() ?: return
-            } catch (e: Throwable) {
+                inputFile.openInputStream() ?: throw IllegalStateException("Failed to open input stream")
+            } catch (e: Exception) {
                 BifrostLogger.decrypt.error("Unable to open input file ${e.message}.")
                 model.endJob(MR.strings.decryptError(e.message.toString()))
+                eventManager.sendEvent(Event.Decrypt.Finish)
                 return
             }
 
-            val outputStream = try {
-                outputFile.openOutputStream() ?: return
-            } catch (e: Throwable) {
-                BifrostLogger.decrypt.error("Unable to open output file ${e.message}.")
-                model.endJob(MR.strings.decryptError(e.message.toString()))
-                return
-            }
+            try {
+                val outputStream = try {
+                    outputFile.openOutputStream() ?: throw IllegalStateException("Failed to open output stream")
+                } catch (e: Exception) {
+                    BifrostLogger.decrypt.error("Unable to open output file ${e.message}.")
+                    inputStream.close()
+                    model.endJob(MR.strings.decryptError(e.message.toString()))
+                    eventManager.sendEvent(Event.Decrypt.Finish)
+                    return
+                }
 
-            CryptUtils.decryptProgress(
-                inputStream,
-                outputStream,
-                key,
-                inputFile.getLength()
-            ) { current, max, bps ->
-                model.progress.value = current to max
-                model.speed.value = bps
-                eventManager.sendEvent(Event.Decrypt.Progress(MR.strings.decrypting(), current, max))
+                try {
+                    CryptUtils.decryptProgress(
+                        inputStream,
+                        outputStream,
+                        key,
+                        inputFile.getLength()
+                    ) { current, max, bps ->
+                        model.progress.value = current to max
+                        model.speed.value = bps
+                        eventManager.sendEvent(Event.Decrypt.Progress(MR.strings.decrypting(), current, max))
+                    }
+                } finally {
+                    outputStream.close()
+                }
+            } finally {
+                inputStream.close()
             }
 
             eventManager.sendEvent(Event.Decrypt.Finish)
             model.endJob(MR.strings.done())
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             eventManager.sendEvent(Event.Decrypt.Finish)
             model.endJob(MR.strings.decryptError((e.message).toString()))
         }

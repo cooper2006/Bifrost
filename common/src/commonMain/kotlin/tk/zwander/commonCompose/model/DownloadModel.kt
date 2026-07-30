@@ -127,6 +127,14 @@ class DownloadModel : BaseModel("download_model") {
         endJob(text)
     }
 
+    override fun resetState() {
+        stateMachine.reset()
+        isPaused.value = false
+        downloadState.value = null
+        totalChunks.value = 0
+        completedChunks.value = 0
+    }
+
     override fun onEnd(text: String) {
         super.onEnd(text)
         // Clean up temp files on success or cancellation (blank text).

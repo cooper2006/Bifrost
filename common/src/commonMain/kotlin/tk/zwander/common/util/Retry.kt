@@ -32,6 +32,11 @@ suspend fun <T> retryWithBackoff(
         try {
             return block()
         } catch (e: Throwable) {
+            // 协程取消异常不可重试，必须立即向上传播
+            if (e is kotlinx.coroutines.CancellationException) {
+                throw e
+            }
+
             lastThrowable = e
 
             if (attempt >= maxRetries || !retryable(e)) {

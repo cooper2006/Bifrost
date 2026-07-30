@@ -56,6 +56,10 @@ object CryptUtils {
          * @return the unpadded data.
          */
         private fun unpad(d: ByteArray): ByteArray {
+            if (d.isEmpty()) {
+                return d
+            }
+
             val lastElement = d.last()
             val padLength = if (lastElement >= 0) lastElement.toInt() else -lastElement.toInt()
 
@@ -147,6 +151,9 @@ object CryptUtils {
          */
         @OptIn(ExperimentalEncodingApi::class)
         fun getAuth(nonce: String): String {
+            if (nonce.isEmpty()) {
+                throw IllegalArgumentException("Nonce cannot be empty")
+            }
             val keyData = nonce.map { (it.code % 16).toByte() }.toByteArray()
             val fKey = getFKey(keyData)
 
@@ -189,6 +196,8 @@ object CryptUtils {
     }
 
     suspend fun authenticateBlock(inBlock: ByteArray): ByteArray {
+        require(inBlock.size >= 16) { "authenticateBlock requires at least 16 bytes, got ${inBlock.size}" }
+
         val wrapped = AuthParamsHandler.getAuthParamStream()
         val header = createAuthHeader(wrapped)
         val stream = object : RandomAccessStream {
@@ -409,21 +418,27 @@ object CryptUtils {
         val buffer = ByteArray(DEFAULT_CHUNK_SIZE)
         val crc = CRC32()
 
-        trackOperationProgress(
-            size = encSize,
-            progressCallback = progressCallback,
-            operation = {
-                val len = enc.readAtMostTo(buffer, 0, buffer.size)
+        try {
+            trackOperationProgress(
+                size = encSize,
+                progressCallback = progressCallback,
+                operation = {
+                    val len = enc.readAtMostTo(buffer, 0, buffer.size)
 
-                if (len > 0) {
-                    crc.update(buffer, 0, len)
+                    if (len > 0) {
+                        crc.update(buffer, 0, len)
+                    }
+                    len.toLong()
+                },
+            )
+        } finally {
+            withContext(Dispatchers.IO) {
+                try {
+                    enc.close()
+                } catch (e: Exception) {
+                    BifrostLogger.crypt.warn("Failed to close CRC32 source", e)
                 }
-                len.toLong()
-            },
-        )
-
-        withContext(Dispatchers.IO) {
-            enc.close()
+            }
         }
 
         return crc.intDigest() == expected.toInt()

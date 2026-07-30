@@ -8,6 +8,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import tk.zwander.common.util.BifrostLogger
 
@@ -41,13 +43,14 @@ class JobManager {
 
     /**
      * 取消所有正在运行的协程。
+     * 使用 cancelChildren() 确保原子性取消所有现有子任务，
+     * 不手动置位 _hasRunningJobs，由 invokeOnCompletion 回调自然更新。
      */
     fun cancelAll() {
-        val children = scope.coroutineContext[Job]?.children?.toList()
-        BifrostLogger.general.info("JobManager.cancelAll: cancelling ${children?.size ?: 0} jobs")
-        children?.forEach { it.cancel() }
-        _hasRunningJobs.value = false
-        BifrostLogger.general.info("JobManager.cancelAll: hasRunningJobs set to false")
+        val job = scope.coroutineContext[Job]
+        val count = job?.children?.count() ?: 0
+        BifrostLogger.general.info("JobManager.cancelAll: cancelling $count jobs")
+        job?.cancelChildren()
     }
 
     /**
@@ -56,5 +59,14 @@ class JobManager {
     fun cancel(job: Job) {
         BifrostLogger.general.info("JobManager.cancel: cancelling single job")
         job.cancel()
+    }
+
+    /**
+     * 释放资源：取消 Scope 中所有协程并终止 Scope。
+     * 调用后不可再 launch 新任务。
+     */
+    fun dispose() {
+        BifrostLogger.general.info("JobManager.dispose: cancelling scope")
+        scope.cancel()
     }
 }

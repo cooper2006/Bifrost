@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 expect fun ObservableSettings(): ObservableSettings
 
@@ -71,6 +73,7 @@ sealed class SettingsKey<Type> {
     protected abstract fun registerListener(callback: (Type?) -> Unit): SettingsListener
 
     private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writeMutex = Mutex()
 
     @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
     fun asMutableStateFlow(): MutableStateFlow<Type> {
@@ -81,14 +84,18 @@ sealed class SettingsKey<Type> {
                 set(value) {
                     wrappedFlow.value = value
                     settingsScope.launch {
-                        setValue(value)
+                        writeMutex.withLock {
+                            setValue(value)
+                        }
                     }
                 }
 
             override suspend fun emit(value: Type) {
                 wrappedFlow.emit(value)
                 settingsScope.launch {
-                    setValue(value)
+                    writeMutex.withLock {
+                        setValue(value)
+                    }
                 }
             }
 
@@ -96,7 +103,9 @@ sealed class SettingsKey<Type> {
                 return wrappedFlow.tryEmit(value).also {
                     if (it) {
                         settingsScope.launch {
-                            setValue(value)
+                            writeMutex.withLock {
+                                setValue(value)
+                            }
                         }
                     }
                 }

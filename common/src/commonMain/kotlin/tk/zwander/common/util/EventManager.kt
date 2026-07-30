@@ -1,8 +1,8 @@
 package tk.zwander.common.util
 
 import io.ktor.util.collections.ConcurrentSet
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 val eventManager: EventManager by lazy { EventManager.create() }
 
@@ -34,11 +34,15 @@ class EventManager private constructor() {
     }
 
     suspend fun sendEvent(event: Event) {
-        coroutineScope {
+        supervisorScope {
             listeners.forEach { listener ->
                 launch {
-                    with(listener) {
-                        onEvent(event)
+                    try {
+                        with(listener) {
+                            onEvent(event)
+                        }
+                    } catch (e: Exception) {
+                        BifrostLogger.general.warn("Event listener failed for $event", e)
                     }
                 }
             }

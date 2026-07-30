@@ -322,6 +322,10 @@ object Downloader {
         )
 
         val existingLen = ctx.encFile.getLength()
+        if (existingLen > size) {
+            BifrostLogger.download.warn("doBinaryInitAndDownload: existing file size ($existingLen) > expected size ($size), deleting corrupted file")
+            ctx.encFile.delete()
+        }
         if (existingLen < size) {
             model.stateMachine.transitionWithProgress(
                 DownloadPhase::Downloading,
@@ -458,31 +462,35 @@ object Downloader {
             model.endJob("")
             return
         }
-        val output = ctx.extractedEncFile.openOutputStream() ?: run {
-            BifrostLogger.download.info("phaseCopyFile: output stream null, aborting")
-            model.endJob("")
-            return
-        }
 
         try {
-            streamOperationWithProgress(
-                input = input,
-                output = output,
-                size = ctx.encFile.getLength(),
-                progressCallback = { current, max, bps ->
-                    model.waitWhilePaused()
-                    model.stateMachine.transitionWithProgress(DownloadPhase::Copying, current, max, bps)
-                    model.progress.value = current to max
-                    model.speed.value = bps
-                    eventManager.sendEvent(
-                        Event.Download.Progress(status = MR.strings.copying(), current = current, max = max),
-                    )
-                },
-            )
-            BifrostLogger.download.info("phaseCopyFile: copy complete")
+            val output = ctx.extractedEncFile.openOutputStream() ?: run {
+                BifrostLogger.download.info("phaseCopyFile: output stream null, aborting")
+                model.endJob("")
+                return
+            }
+
+            try {
+                streamOperationWithProgress(
+                    input = input,
+                    output = output,
+                    size = ctx.encFile.getLength(),
+                    progressCallback = { current, max, bps ->
+                        model.waitWhilePaused()
+                        model.stateMachine.transitionWithProgress(DownloadPhase::Copying, current, max, bps)
+                        model.progress.value = current to max
+                        model.speed.value = bps
+                        eventManager.sendEvent(
+                            Event.Download.Progress(status = MR.strings.copying(), current = current, max = max),
+                        )
+                    },
+                )
+                BifrostLogger.download.info("phaseCopyFile: copy complete")
+            } finally {
+                output.close()
+            }
         } finally {
             input.close()
-            output.close()
             ctx.encFile.delete()
         }
     }
@@ -512,19 +520,32 @@ object Downloader {
             return false
         }
 
-        CryptUtils.decryptProgress(
-            ctx.extractedEncFile.openInputStream() ?: return false,
-            ctx.decFile?.openOutputStream() ?: return false,
-            key,
-            size,
-        ) { current, max, bps ->
-            model.waitWhilePaused()
-            model.stateMachine.transitionWithProgress(DownloadPhase::Decrypting, current, max, bps)
-            model.progress.value = current to max
-            model.speed.value = bps
-            eventManager.sendEvent(
-                Event.Download.Progress(status = MR.strings.decrypting(), current = current, max = max),
-            )
+        val decInput = ctx.extractedEncFile.openInputStream() ?: return false
+        try {
+            val decOutput = ctx.decFile?.openOutputStream() ?: run {
+                decInput.close()
+                return false
+            }
+            try {
+                CryptUtils.decryptProgress(
+                    decInput,
+                    decOutput,
+                    key,
+                    size,
+                ) { current, max, bps ->
+                    model.waitWhilePaused()
+                    model.stateMachine.transitionWithProgress(DownloadPhase::Decrypting, current, max, bps)
+                    model.progress.value = current to max
+                    model.speed.value = bps
+                    eventManager.sendEvent(
+                        Event.Download.Progress(status = MR.strings.decrypting(), current = current, max = max),
+                    )
+                }
+            } finally {
+                decOutput.close()
+            }
+        } finally {
+            decInput.close()
         }
 
         BifrostLogger.download.info("phaseDecrypt: complete")

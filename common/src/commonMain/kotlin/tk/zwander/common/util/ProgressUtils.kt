@@ -83,48 +83,50 @@ suspend fun trackOperationProgress(
 
     val averager = Averager()
 
-    while (isActive && condition()) {
-        val timedValue = measureTimedValue {
-            operation()
-        }
-
-        if (timedValue.value <= 0) break
-
-        val len = timedValue.value
-        totalLen += len
-
-        launch(Dispatchers.Unconfined) {
-            val duration = timedValue.duration
-            val current = totalLen.value + progressOffset
-
-            if (finished.value || current >= size) {
-                return@launch
+    try {
+        while (isActive && condition()) {
+            val timedValue = measureTimedValue {
+                operation()
             }
 
-            val (totalTime, totalRead) = averager.updateAndSum(duration, len)
-            val bps = (totalRead / totalTime.toDouble(DurationUnit.SECONDS)).toLong()
+            if (timedValue.value < 0) break
 
-            if (throttle) {
-                val currentTime = TimeSource.Monotonic.markNow()
-                val lastUpdateTimeValue = lastUpdateTime.value
-                if (lastUpdateTimeValue != null && currentTime - lastUpdateTimeValue < 100.milliseconds) {
+            val len = timedValue.value
+            totalLen += len
+
+            launch {
+                val duration = timedValue.duration
+                val current = totalLen.value + progressOffset
+
+                if (finished.value || current >= size) {
                     return@launch
                 }
-                lastUpdateTime.value = currentTime
-            }
 
-            if (finished.value) {
-                return@launch
-            }
+                val (totalTime, totalRead) = averager.updateAndSum(duration, len)
+                val bps = (totalRead / totalTime.toDouble(DurationUnit.SECONDS)).toLong()
 
-            progressCallback(
-                current,
-                size,
-                bps,
-            )
+                if (throttle) {
+                    val currentTime = TimeSource.Monotonic.markNow()
+                    val lastUpdateTimeValue = lastUpdateTime.value
+                    if (lastUpdateTimeValue != null && currentTime - lastUpdateTimeValue < 100.milliseconds) {
+                        return@launch
+                    }
+                    lastUpdateTime.value = currentTime
+                }
+
+                if (finished.value) {
+                    return@launch
+                }
+
+                progressCallback(
+                    current,
+                    size,
+                    bps,
+                )
+            }
         }
+    } finally {
+        finished.value = true
+        averager.close()
     }
-
-    finished.value = true
-    averager.close()
 }

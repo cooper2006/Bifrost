@@ -123,7 +123,9 @@ internal fun DownloadView() {
                                     model,
                                     confirmCallback = object : Downloader.DownloadErrorCallback {
                                         override fun onError(info: Downloader.DownloadErrorInfo) {
-                                            downloadErrorInfo = info
+                                            scope.launch {
+                                                downloadErrorInfo = info
+                                            }
                                         }
                                     },
                                 )

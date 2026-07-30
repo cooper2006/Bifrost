@@ -36,9 +36,10 @@ val globalHttpClient: HttpClient = HttpClient(CIO) {
 val ketch: Ketch = Ketch(
     httpEngine = KtorHttpEngine(globalHttpClient.config {
         install(HttpTimeout) {
-            socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-            requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-            connectTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+            // Ketch 负责自己的重试和断连恢复，这里给足够大的上限而非无限
+            socketTimeoutMillis = 60_000L
+            requestTimeoutMillis = 86_400_000L
+            connectTimeoutMillis = 30_000L
         }
     }),
     config = DownloadConfig(

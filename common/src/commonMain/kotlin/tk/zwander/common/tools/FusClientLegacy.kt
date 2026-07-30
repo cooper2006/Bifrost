@@ -171,7 +171,9 @@ object FusClientLegacy : IFusClient<FusClientLegacy.Request> {
                     data = mapOf("error" to e),
                     type = BreadcrumbType.ERROR,
                 )
-                BifrostLogger.general.error("Error generating nonce.")
+                BifrostLogger.general.error("Error generating nonce: ${e.message}")
+                // nonce 解析失败会导致后续请求使用无效 auth，必须让上层重试
+                throw IllegalStateException("Nonce parsing failed", e)
             }
         }
 

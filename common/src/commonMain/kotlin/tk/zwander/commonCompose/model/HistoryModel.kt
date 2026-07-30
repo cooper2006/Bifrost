@@ -17,4 +17,9 @@ class HistoryModel : BaseModel("history_model") {
      * The changelog items for this history lookup.
      */
     val changelogs = MutableStateFlow<Changelogs?>(null)
+
+    override fun resetState() {
+        historyItems.value = listOf()
+        changelogs.value = null
+    }
 }

@@ -134,7 +134,8 @@ interface IFusClient<Request : IFusClient.IRequest> {
                     }
                 }
                 timeout {
-                    this.requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    // 大文件下载需要很长的总时间，但不应无限阻塞；24h 足够完成任何固件下载
+                    this.requestTimeoutMillis = 86_400_000L
                     this.socketTimeoutMillis = 60_000L  // 60秒无数据则超时，避免连接静默断开后无限阻塞
                     this.connectTimeoutMillis = 30_000L
                 }

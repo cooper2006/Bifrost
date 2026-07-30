@@ -167,14 +167,18 @@ object VersionFetch {
         val requestContent = createHistoryRequest(model, region)
         BifrostLogger.download.info("VersionFetch.performHistoryRequest: request content length=${requestContent.length}")
 
-        val response = IFusClient.selectClientAndMakeRequest(
-            request = FusClient.Request.HISTORY,
-            data = requestContent,
-            signature = model,
-        )
-        BifrostLogger.download.info("VersionFetch.performHistoryRequest: response length=${response.length}")
-
-        return Ksoup.parse(response)
+        return try {
+            val response = IFusClient.selectClientAndMakeRequest(
+                request = FusClient.Request.HISTORY,
+                data = requestContent,
+                signature = model,
+            )
+            BifrostLogger.download.info("VersionFetch.performHistoryRequest: response length=${response.length}")
+            Ksoup.parse(response)
+        } catch (e: Exception) {
+            BifrostLogger.download.warn("VersionFetch.performHistoryRequest failed: ${e.javaClass.simpleName}: ${e.message}")
+            Ksoup.parse("")
+        }
     }
 
     private fun createHistoryRequest(

@@ -88,6 +88,9 @@ object Request {
                     )
 
                 Ksoup.parse(response)
+            } catch (e: CancellationException) {
+                // 协程取消不可当作普通错误处理，必须立即向上传播
+                throw e
             } catch (e: Throwable) {
                 BifrostLogger.download.info("BinaryInform attempt ${index + 1} error: ${e.javaClass.simpleName}: ${e.message}")
                 BifrostLogger.download.debug("BinaryInform stacktrace", e)

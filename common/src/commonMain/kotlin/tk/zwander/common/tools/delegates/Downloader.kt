@@ -230,7 +230,6 @@ object Downloader {
 
         model.addTempFile(ctx.encFile)
         model.addTempFile(ctx.extractedEncFile)
-        model.addTempFile(ctx.decFile)
         model.addTempFile(ctx.decKeyFile)
 
         BifrostLogger.download.info("buildDownloadContext: done, encFile=${ctx.encFile.getAbsolutePath()}, decFile=${ctx.decFile?.getAbsolutePath()}")

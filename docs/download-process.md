@@ -3,6 +3,7 @@
 本文档详细介绍点击"下载"按钮后，Bifrost 从三星服务器获取固件的完整技术流程。涵盖代码层面与实际运行时行为。
 
 > **文档版本：** v2.2.0+（架构改进 Phase 1~3：DownloadStateMachine、阶段方法拆分、retryWithBackoff 统一重试、authMutex 线程安全、JobManager 协程管理、单元测试覆盖）
+> **最新修复：** v2.2.1 — 修复 `decFile` 被误加入临时文件列表导致下载完成后最终固件被删除的问题
 
 ---
 
@@ -803,6 +804,7 @@ sequenceDiagram
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| (当前) | 2026-08-09 | 修复 `decFile` 被误加入临时文件列表导致下载完成后最终固件被删除的 bug |
 | `7096cead` | 2026-07-29 | 架构改进 Phase 3：单元测试（4 文件 117 测试）、retryWithBackoff 编译修复、DownloadStateMachine/JobManager 文档更新 |
 | (当前) | 2026-07-28 ~ 29 | 架构改进 Phase 1~2：DownloadStateMachine、阶段方法拆分、JobManager/BaseModel 分离、authMutex 线程安全、retryWithBackoff 统一重试 |
 | (当前) | 2026-07-28 | 第四轮代码审查：GlobalScope 消除（3 文件）、e.printStackTrace() 全替换（18 处）、!! NPE 防御性修复（7 处） |

@@ -283,9 +283,9 @@ object FusClient : IFusClient<FusClient.Request> {
         start: Long,
         size: Long,
         dest: IPlatformFile,
-        onAuthRefresh: (suspend () -> Unit)? = null,
+        onAuthRefresh: (suspend () -> Unit)?,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
-        pauseCheck: (suspend () -> Unit)? = null,
+        pauseCheck: (suspend () -> Unit)?,
     ): String? {
         BifrostLogger.download.info("downloadFile start: fileName=$fileName, start=$start, size=${size}bytes (${size / (1024 * 1024)}MB), dest=${dest.getAbsolutePath()}")
         val url = getDownloadUrl(fileName)

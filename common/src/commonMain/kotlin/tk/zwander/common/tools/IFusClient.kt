@@ -52,6 +52,8 @@ interface IFusClient<Request : IFusClient.IRequest> {
      * Download a file from Samsung's server.
      * @param fileName the name of the file to download.
      * @param start an optional offset. Used for resuming downloads.
+     * @param onAuthRefresh optional callback to refresh auth on 401 (used by custom implementations).
+     * @param pauseCheck optional callback to check if download should pause.
      */
     @OptIn(InternalAPI::class, InternalIoApi::class)
     suspend fun downloadFile(
@@ -59,7 +61,9 @@ interface IFusClient<Request : IFusClient.IRequest> {
         start: Long = 0,
         size: Long,
         dest: IPlatformFile,
+        onAuthRefresh: (suspend () -> Unit)? = null,
         progressCallback: suspend (current: Long, max: Long, bps: Long) -> Unit,
+        pauseCheck: (suspend () -> Unit)? = null,
     ): String? {
         // 调用接口自身的抽象方法，而非具体实现类
         val authV = getAuthV()

@@ -223,10 +223,11 @@ object FusClient : IFusClient<FusClient.Request> {
         val body = response.bodyAsText()
         BifrostLogger.download.info("makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
-        if (request != Request.GENERATE_NONCE && response.is401(body)) {
-            BifrostLogger.download.info("makeReq: got 401, regenerating nonce")
-            generateNonceInternal()
-            throw RuntimeException("认证持续失败（重试后仍为 401）")
+        if (request == Request.GENERATE_NONCE) {
+            AuthParamsHandler.extractFile()
+        } else if (response.is401(body)) {
+            generateNonce()
+            return makeReq(request, data)
         }
 
         if (response.headers["NONCE"] != null || response.headers["nonce"] != null) {
@@ -277,8 +278,7 @@ object FusClient : IFusClient<FusClient.Request> {
      * @param progressCallback 进度回调
      * @param onAuthRefresh 授权刷新回调，在 401 时调用以重新建立下载会话（如 BinaryInit）
      */
-    @OptIn(InternalAPI::class)
-    suspend fun downloadFile(
+    override suspend fun downloadFile(
         fileName: String,
         start: Long,
         size: Long,

@@ -1,4 +1,4 @@
-## [Unreleased]
+## [2.2.1] - 2026-08-13
 
 ### Fixed
 - **下载完成后最终固件 .zip 被误删**：`buildDownloadContext()` 中错误地将 `decFile`（解密后的最终固件文件）注册到临时文件列表 `_tempFiles`，导致 `cleanupTempFiles()` 在成功完成后删除用户保留的固件。已移除 `model.addTempFile(ctx.decFile)`，`decFile` 不再参与临时文件清理

@@ -1,5 +1,5 @@
-extra["versionCode"] = 94
-extra["versionName"] = "2.2.0"
+extra["versionCode"] = 95
+extra["versionName"] = "2.2.1"
 
 extra["compileSdk"] = 37
 extra["targetSdk"] = 36

@@ -615,6 +615,8 @@ POST https://neofussvr.sslcs.cdngc.net/NF_SmartDownloadGenerateNonce.do
 
 服务器返回的 nonce 经过 `CryptUtils.decryptNonce()` 解密（通过专有的认证块解密算法），得到用于后续请求签名的 `auth` 值。
 
+> **auth_params 重建（v2.2.1+）**：每次应用启动（`MainView`）和每次 nonce 生成成功后（`FusClient.makeReq` 的 `GENERATE_NONCE` 分支），`AuthParamsHandler.extractFile()` 会先 `tempFile.delete()` 删除旧的 `auth_param.dat` 临时文件，再从打包资源重新解压，避免三星服务器因过期的 auth_params 拒绝请求。
+
 ### 请求认证头
 
 ```http
@@ -766,6 +768,7 @@ sequenceDiagram
 
 | 问题 | 修复内容 | 版本 |
 |------|----------|------|
+| auth_params 文件过期导致请求失败 | 每次应用启动和每次 nonce 生成成功后，删除并重新解压 `auth_param.dat`（`AuthParamsHandler.extractFile` 增加 `tempFile.delete()`，合并自上游 zacharee/master） | v2.2.1 |
 | FusClient/FusClientLegacy Mutex 死锁 | 将 `getAuthV` 和 `makeSignatureHash` 拆分为：<br>- 公开 suspend 版本（自行加锁，供外部调用）<br>- 内部非 suspend 版本（假设调用方已持有锁，供 `makeReqInternal` 调用）<br>`makeReqInternal` 改为调用内部版本，避免重复加锁 | v2.2.0+ |
 | 单体 performDownload 难以测试和维护 | 拆分为 7 个阶段方法（buildDownloadContext/writeDecryptionKey/phaseBinaryInitAndDownload 等），每个方法单一职责 | v2.2.0+ |
 | 下载进度/速度/状态三个独立字段管理混乱 | 引入 DownloadStateMachine + DownloadPhase sealed interface，单 StateFlow 驱动 UI | v2.2.0+ |
@@ -804,6 +807,9 @@ sequenceDiagram
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| `02af8532a` | 2026-08-14 | 版本号升级至 2.2.1（build.gradle.kts + CHANGELOG，versionCode 95） |
+| `c97826886` | 2026-08-13 | 修复 IFusClient.downloadFile 覆写编译错误（接口补齐 onAuthRefresh/pauseCheck 参数） |
+| `4b8f952c9` | 2026-08-13 | 合并上游 zacharee/master（`15936f926`）：Update TACs / Update dependencies（ktor 3.5.2）/ Cleanup / auth_params 重建逻辑 |
 | (当前) | 2026-08-09 | 修复 `decFile` 被误加入临时文件列表导致下载完成后最终固件被删除的 bug |
 | `7096cead` | 2026-07-29 | 架构改进 Phase 3：单元测试（4 文件 117 测试）、retryWithBackoff 编译修复、DownloadStateMachine/JobManager 文档更新 |
 | (当前) | 2026-07-28 ~ 29 | 架构改进 Phase 1~2：DownloadStateMachine、阶段方法拆分、JobManager/BaseModel 分离、authMutex 线程安全、retryWithBackoff 统一重试 |

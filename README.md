@@ -58,6 +58,12 @@ Bifrost 使用 Jetpack Compose、JetBrains Compose for Desktop 和 Kotlin Multip
 # 更新日志
 发布说明详见 [CHANGELOG.md](CHANGELOG.md)。
 
+### v2.2.2（2026-08-24）
+- **FusClientLegacy 现代认证**：启用 `USE_MODERN_AUTH`，使用与 FusClient 一致的认证格式
+- **Cookie 头重构**：按服务端返回动态拼接 Cookie 头
+- **401 重试修复**：legacy 下载添加有界重试逻辑
+- **auth_params 过期修复**：每次启动和 nonce 生成后重新解压认证文件
+
 # 常见问题与故障排除
 
 ## Bifrost 无法下载手表固件

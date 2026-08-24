@@ -3,7 +3,8 @@
 本文档详细介绍点击"下载"按钮后，Bifrost 从三星服务器获取固件的完整技术流程。涵盖代码层面与实际运行时行为。
 
 > **文档版本：** v2.2.0+（架构改进 Phase 1~3：DownloadStateMachine、阶段方法拆分、retryWithBackoff 统一重试、authMutex 线程安全、JobManager 协程管理、单元测试覆盖）
-> **最新修复：** v2.2.1 — 修复 `decFile` 被误加入临时文件列表导致下载完成后最终固件被删除的问题
+> **最新修复：** v2.2.2 — FusClientLegacy 采用上游现代认证方案（`USE_MODERN_AUTH`），Cookie 头拆分重构，legacy 模式 401 有界重试，auth_params 每次会话重建
+> **历史修复：** v2.2.1 — 修复 `decFile` 被误加入临时文件列表导致下载完成后最终固件被删除的问题
 
 ---
 
@@ -807,6 +808,8 @@ sequenceDiagram
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| `8776f024a` | 2026-08-24 | 合并上游 zacharee/master（`11647f0c0`）：FusClientLegacy 采纳上游 `USE_MODERN_AUTH` 现代认证与动态 Cookie 头、legacy 401 有界重试、移除 resuming、cleanup，保留本地 authMutex/retryWithBackoff/阶段化下载架构 |
+| `6161e3e86` | 2026-08-24 | 刷新文档反映 v2.2.1 变更（auth_params 重建逻辑） |
 | `02af8532a` | 2026-08-14 | 版本号升级至 2.2.1（build.gradle.kts + CHANGELOG，versionCode 95） |
 | `c97826886` | 2026-08-13 | 修复 IFusClient.downloadFile 覆写编译错误（接口补齐 onAuthRefresh/pauseCheck 参数） |
 | `4b8f952c9` | 2026-08-13 | 合并上游 zacharee/master（`15936f926`）：Update TACs / Update dependencies（ktor 3.5.2）/ Cleanup / auth_params 重建逻辑 |

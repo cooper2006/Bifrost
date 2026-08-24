@@ -1,3 +1,15 @@
+## [2.2.2] - 2026-08-24
+
+### Changed
+- **FusClientLegacy 采用现代认证方案**：启用 `USE_MODERN_AUTH = true`，使用与 FusClient 一致的认证头格式，移除 `newauth` 字段
+- **Cookie 头重构**：将单一 `sessionId` 拆分为 `jSessionId` 和 `session`，按服务端实际返回的 cookie 动态拼接 `Cookie` 请求头
+
+### Fixed
+- **legacy 模式 401 重试机制**：修复 legacy 下载在收到 401 时无限重试的问题，添加有界重试逻辑
+- **auth_params 过期问题**：每次应用启动和每次 nonce 生成成功后，删除并重新解压 `auth_param.dat`，避免使用过期的认证参数
+
+---
+
 ## [2.2.1] - 2026-08-18
 
 ### Fixed

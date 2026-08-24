@@ -15,7 +15,6 @@ import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpMethod
-import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.readTo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -55,7 +54,6 @@ interface IFusClient<Request : IFusClient.IRequest> {
      * @param onAuthRefresh optional callback to refresh auth on 401 (used by custom implementations).
      * @param pauseCheck optional callback to check if download should pause.
      */
-    @OptIn(InternalAPI::class, InternalIoApi::class)
     suspend fun downloadFile(
         fileName: String,
         start: Long = 0,
@@ -70,13 +68,7 @@ interface IFusClient<Request : IFusClient.IRequest> {
         val url = getDownloadUrl(fileName)
 
         return if (HostOS.current != HostOS.Android) {
-            val task = ketch.tasks.value.find { it.request.url == url }
-                ?.let { download ->
-                    download.resume(Destination(dest.getAbsolutePath()))
-                    download.takeIf {
-                        it.state.value !is DownloadState.Completed
-                    }
-                } ?: ketch.download(
+            val task = ketch.download(
                 DownloadRequest(
                     url = url,
                     destination = Destination(dest.getAbsolutePath()),

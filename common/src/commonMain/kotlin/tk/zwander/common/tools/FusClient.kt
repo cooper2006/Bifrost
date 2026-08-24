@@ -18,7 +18,6 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
-import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.core.toByteArray
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException

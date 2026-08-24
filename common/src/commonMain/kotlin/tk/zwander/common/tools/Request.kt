@@ -26,7 +26,6 @@ import tk.zwander.common.util.isAccessoryModel
 import tk.zwander.common.util.textNode
 import tk.zwander.samloaderkotlin.resources.MR
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.ExperimentalTime
 
 /**
  * Handle some requests to Samsung's servers.
@@ -224,9 +223,13 @@ object Request {
         legacy: Boolean,
     ): String {
         val logicCheck = run {
-            // 防御性检查：文件名至少需要 25 个字符才能提取中间段
-            // 正常三星固件文件名（如 SM-G970F_8_WWW_XXXX_XXXX.zip.enc2）远长于此
-            if (fileName.length >= 25) {
+            if (legacy) {
+                // 上游 legacy 模式：文件名取点号前片段，按 16 取模偏移截取
+                val special = fileName.split(".").first().run { slice(this.length - (16 % this.length)..this.lastIndex) }
+                getLogicCheck(special, nonce)
+            } else if (fileName.length >= 25) {
+                // 防御性检查：文件名至少需要 25 个字符才能提取中间段
+                // 正常三星固件文件名（如 SM-G970F_8_WWW_XXXX_XXXX.zip.enc2）远长于此
                 val special = fileName.slice(fileName.length - 25 until fileName.length - 9)
                 getLogicCheck(special, nonce)
             } else {
@@ -237,9 +240,12 @@ object Request {
 
         val xml = xml("FUSMsg") {
             "FUSHdr" {
-                textNode("ProtoVer", "1")
-                textNode("SessionID", "0")
-                textNode("MsgID", "1")
+                textNode("ProtoVer", if (legacy) "1.0" else "1")
+
+                if (!legacy) {
+                    textNode("SessionID", "0")
+                    textNode("MsgID", "1")
+                }
             }
             "FUSBody" {
                 "Put" {
@@ -302,7 +308,6 @@ object Request {
      * @param region the device region.
      * @return a BinaryFileInfo instance representing the file.
      */
-    @OptIn(ExperimentalTime::class)
     private suspend fun getBinaryFile(
         fw: String,
         model: String,
@@ -443,7 +448,7 @@ object Request {
 
                 val v4Key = try {
                     responseXml.extractV4Key()
-                        ?: CryptUtils.getV4Key(fw, model, region, imeiSerial)
+                        ?: CryptUtils.getV4Key(fw, model, region, imeiSerial, legacy = legacy)
                 } catch (e: Exception) {
                     BifrostLogger.download.warn("V4 key extraction failed: ${e.message}")
                     null

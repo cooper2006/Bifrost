@@ -1,5 +1,5 @@
 {
-  "originHash" : "fb467ab35a0427623393f3b6df0699a8264ae5a7a1513c5c1911363f5600c364",
+  "originHash" : "53836ddffe6c75f5d91f64bcdbaa591c5f1cff938ec072137a20f78e91e09908",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "a3f56c6191f0d8ae6b2407aad026ce3580298ce1",
         "version" : "6.32.2"
+      }
+    },
+    {
+      "identity" : "bugsnag-cocoa-performance",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/bugsnag/bugsnag-cocoa-performance",
+      "state" : {
+        "revision" : "be3700d0c0944da82c64939ea381aff6e84e3b3f",
+        "version" : "4.0.0"
       }
     },
     {
@@ -124,7 +133,7 @@
       "location" : "https://github.com/rickclephas/NSExceptionKt",
       "state" : {
         "branch" : "master",
-        "revision" : "1756e2b0651f367c5096a8bf9f9401b034a87fa6"
+        "revision" : "3fd7822da0e9361c74624c19dae1554d323ab7e6"
       }
     },
     {

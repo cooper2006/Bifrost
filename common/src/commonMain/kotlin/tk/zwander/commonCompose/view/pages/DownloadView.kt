@@ -43,16 +43,17 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import dev.icerock.moko.resources.compose.painterResource
-import dev.icerock.moko.resources.compose.stringResource
 import dev.zwander.compose.alertdialog.InWindowAlertDialog
 import kotlinx.coroutines.launch
 import my.nanihadesuka.compose.ColumnScrollbar
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 import tk.zwander.common.GradleConfig
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.*
 import tk.zwander.common.tools.delegates.Downloader
 import tk.zwander.common.util.Event
 import tk.zwander.common.util.eventManager
-import tk.zwander.common.util.invoke
 import tk.zwander.common.util.isAccessoryModel
 import tk.zwander.commonCompose.locals.LocalDownloadModel
 import tk.zwander.commonCompose.util.ThemeConstants
@@ -63,7 +64,6 @@ import tk.zwander.commonCompose.view.components.ExpandButton
 import tk.zwander.commonCompose.view.components.HybridButton
 import tk.zwander.commonCompose.view.components.MRFLayout
 import tk.zwander.commonCompose.view.components.ProgressInfo
-import tk.zwander.samloaderkotlin.resources.MR
 import kotlin.time.ExperimentalTime
 
 /**
@@ -130,9 +130,9 @@ internal fun DownloadView() {
                             }
                         },
                         enabled = canDownload,
-                        vectorIcon = painterResource(MR.images.download),
-                        text = stringResource(MR.strings.download),
-                        description = stringResource(MR.strings.downloadFirmware),
+                        vectorIcon = painterResource(Res.drawable.download),
+                        text = stringResource(Res.string.download),
+                        description = stringResource(Res.string.downloadFirmware),
                         parentSize = constraints.maxWidth
                     )
 
@@ -145,9 +145,9 @@ internal fun DownloadView() {
                             }
                         },
                         enabled = canCheckVersion,
-                        text = stringResource(MR.strings.checkForUpdates),
-                        vectorIcon = painterResource(MR.images.refresh),
-                        description = stringResource(MR.strings.checkForUpdatesDesc),
+                        text = stringResource(Res.string.checkForUpdates),
+                        vectorIcon = painterResource(Res.drawable.refresh),
+                        description = stringResource(Res.string.checkForUpdatesDesc),
                         parentSize = constraints.maxWidth,
                     )
 
@@ -159,9 +159,9 @@ internal fun DownloadView() {
                             model.isPaused.value = !model.isPaused.value
                         },
                         enabled = hasRunningJobs,
-                        text = if (isPaused) stringResource(MR.strings.resume) else stringResource(MR.strings.pause),
-                        description = if (isPaused) stringResource(MR.strings.resume) else stringResource(MR.strings.pause),
-                        vectorIcon = if (isPaused) painterResource(MR.images.play) else painterResource(MR.images.pause),
+                        text = if (isPaused) stringResource(Res.string.resume) else stringResource(Res.string.pause),
+                        description = if (isPaused) stringResource(Res.string.resume) else stringResource(Res.string.pause),
+                        vectorIcon = if (isPaused) painterResource(Res.drawable.play) else painterResource(Res.drawable.pause),
                         parentSize = constraints.maxWidth
                     )
 
@@ -175,9 +175,9 @@ internal fun DownloadView() {
                             model.endJob("")
                         },
                         enabled = hasRunningJobs,
-                        text = stringResource(MR.strings.cancel),
-                        description = stringResource(MR.strings.cancel),
-                        vectorIcon = painterResource(MR.images.cancel),
+                        text = stringResource(Res.string.cancel),
+                        description = stringResource(Res.string.cancel),
+                        vectorIcon = painterResource(Res.drawable.cancel),
                         parentSize = constraints.maxWidth
                     )
                 }
@@ -217,7 +217,7 @@ internal fun DownloadView() {
 
 
                     Text(
-                        text = stringResource(MR.strings.manual),
+                        text = stringResource(Res.string.manual),
                         modifier = Modifier.align(Alignment.CenterVertically),
                     )
                 }
@@ -241,7 +241,7 @@ internal fun DownloadView() {
                                     color = MaterialTheme.colorScheme.error,
                                 ),
                             ) {
-                                append(MR.strings.manualWarning())
+                                append(stringResource(Res.string.manualWarning))
                                 append(" ")
 
                                 withStyle(
@@ -250,7 +250,7 @@ internal fun DownloadView() {
                                     withLink(LinkAnnotation.Clickable("moreInfo", linkInteractionListener = {
                                         showingRequestWarningDialog = true
                                     })) {
-                                        append(MR.strings.moreInfo())
+                                        append(stringResource(Res.string.moreInfo))
                                     }
                                 }
                             }
@@ -265,24 +265,25 @@ internal fun DownloadView() {
                     InWindowAlertDialog(
                         showing = showingRequestWarningDialog,
                         title = {
-                            Text(text = stringResource(MR.strings.moreInfo))
+                            Text(text = stringResource(Res.string.moreInfo))
                         },
                         text = {
                             val info = buildAnnotatedString {
                                 append(
-                                    MR.strings.manualWarningDetails(
+                                    stringResource(
+                                        Res.string.manualWarningDetails,
                                         GradleConfig.appName,
-                                        GradleConfig.appName
-                                    )
+                                        GradleConfig.appName,
+                                    ),
                                 )
                                 append(" ")
                                 withLink(LinkAnnotation.Url("https://github.com/zacharee/SamloaderKotlin/issues/10")) {
                                     withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-                                        append(MR.strings.manualWarningDetails2())
+                                        append(stringResource(Res.string.manualWarningDetails2))
                                     }
                                 }
                                 append(" ")
-                                append(MR.strings.manualWarningDetails3())
+                                append(stringResource(Res.string.manualWarningDetails3))
                             }
 
                             Text(
@@ -296,7 +297,7 @@ internal fun DownloadView() {
                                     showingRequestWarningDialog = false
                                 }
                             ) {
-                                Text(stringResource(MR.strings.ok))
+                                Text(stringResource(Res.string.ok))
                             }
                         },
                         onDismissRequest = {
@@ -312,7 +313,7 @@ internal fun DownloadView() {
                 exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.CenterStart),
             ) {
                 Text(
-                    text = stringResource(MR.strings.accessory_model_warning),
+                    text = stringResource(Res.string.accessory_model_warning),
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
@@ -336,7 +337,7 @@ internal fun DownloadView() {
                     Spacer(Modifier.height(4.dp))
 
                     Text(
-                        text = stringResource(MR.strings.osVersion, displayCode),
+                        text = stringResource(Res.string.osVersion, displayCode),
                     )
                 }
             }
@@ -359,7 +360,7 @@ internal fun DownloadView() {
             ) {
                 ExpandButton(
                     changelogExpanded,
-                    stringResource(MR.strings.changelog),
+                    stringResource(Res.string.changelog),
                     modifier = Modifier.fillMaxWidth(),
                 ) { changelogExpanded = it }
             }
@@ -382,7 +383,7 @@ internal fun DownloadView() {
             }
         },
         title = {
-            Text(text = stringResource(MR.strings.warning))
+            Text(text = stringResource(Res.string.warning))
         },
         text = {
             Text(text = downloadErrorInfo?.message ?: "")
@@ -399,7 +400,7 @@ internal fun DownloadView() {
                     }
                 }
             ) {
-                Text(text = stringResource(MR.strings.no))
+                Text(text = stringResource(Res.string.no))
             }
 
             TextButton(
@@ -412,7 +413,7 @@ internal fun DownloadView() {
                 }
             ) {
                 Text(
-                    text = stringResource(MR.strings.yes),
+                    text = stringResource(Res.string.yes),
                     color = MaterialTheme.colorScheme.error
                 )
             }

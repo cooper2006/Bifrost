@@ -23,7 +23,15 @@ import tk.zwander.common.util.invoke
 import tk.zwander.common.util.retryWithBackoff
 import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.commonCompose.model.DownloadModel
-import tk.zwander.samloaderkotlin.resources.MR
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.checkingCRC
+import tk.zwander.common.generated.resources.copying
+import tk.zwander.common.generated.resources.crcCheckFailed
+import tk.zwander.common.generated.resources.decrypting
+import tk.zwander.common.generated.resources.done
+import tk.zwander.common.generated.resources.downloading
+import tk.zwander.common.generated.resources.firmwareCheckError
+import tk.zwander.common.generated.resources.md5CheckFailed
 import kotlin.time.ExperimentalTime
 
 /**
@@ -156,8 +164,8 @@ object Downloader {
             phaseCleanup(ctx, model)
 
             BifrostLogger.download.info("performDownload: DONE")
-            model.stateMachine.transition(DownloadPhase.Done(MR.strings.done()))
-            model.endJobSuccess(MR.strings.done())
+            model.stateMachine.transition(DownloadPhase.Done(Res.string.done()))
+            model.endJobSuccess(Res.string.done())
         } catch (e: Throwable) {
             BifrostLogger.download.info("performDownload: FAILED: ${e.javaClass.simpleName}: ${e.message}")
             model.stateMachine.transition(DownloadPhase.Error(e.message ?: "", e))
@@ -357,7 +365,7 @@ object Downloader {
                     model.progress.value = current to max
                     model.speed.value = bps
                     eventManager.sendEvent(
-                        Event.Download.Progress(status = MR.strings.downloading(), current = current, max = max),
+                        Event.Download.Progress(status = Res.string.downloading(), current = current, max = max),
                     )
                 },
             )
@@ -394,14 +402,14 @@ object Downloader {
             model.progress.value = current to max
             model.speed.value = bps
             eventManager.sendEvent(
-                Event.Download.Progress(status = MR.strings.checkingCRC(), current = current, max = max),
+                Event.Download.Progress(status = Res.string.checkingCRC(), current = current, max = max),
             )
         }
 
         if (!result) {
             BifrostLogger.download.info("phaseVerifyCrc32: FAILED")
             model.cleanupTempFiles()
-            model.endJob(MR.strings.crcCheckFailed())
+            model.endJob(Res.string.crcCheckFailed())
             return false
         }
         return true
@@ -431,7 +439,7 @@ object Downloader {
         if (!result) {
             BifrostLogger.download.info("phaseVerifyMd5: FAILED")
             model.cleanupTempFiles()
-            model.endJob(MR.strings.md5CheckFailed())
+            model.endJob(Res.string.md5CheckFailed())
             return false
         }
         return true
@@ -475,7 +483,7 @@ object Downloader {
                     model.progress.value = current to max
                     model.speed.value = bps
                     eventManager.sendEvent(
-                        Event.Download.Progress(status = MR.strings.copying(), current = current, max = max),
+                        Event.Download.Progress(status = Res.string.copying(), current = current, max = max),
                     )
                 },
             )
@@ -523,7 +531,7 @@ object Downloader {
             model.progress.value = current to max
             model.speed.value = bps
             eventManager.sendEvent(
-                Event.Download.Progress(status = MR.strings.decrypting(), current = current, max = max),
+                Event.Download.Progress(status = Res.string.decrypting(), current = current, max = max),
             )
         }
 
@@ -561,7 +569,7 @@ object Downloader {
             if (error != null) {
                 BifrostLogger.download.warn("onFetch: server returned error: ${error.message}")
                 model.endJob(
-                    MR.strings.firmwareCheckError(
+                    Res.string.firmwareCheckError(
                         error.message.toString(),
                         output.replace("\t", "  ")
                     )
@@ -580,12 +588,12 @@ object Downloader {
             model.fw.value = fw
             model.osCode.value = os
 
-            model.endJob(MR.strings.done())
+            model.endJob(Res.string.done())
             BifrostLogger.download.info("onFetch SUCCESS")
         } catch (e: CancellationException) {
             BifrostLogger.download.info("onFetch cancelled (timeout or user cancel)")
             model.endJob(
-                MR.strings.firmwareCheckError(
+                Res.string.firmwareCheckError(
                     "Request timed out or was cancelled",
                     "",
                 )
@@ -593,7 +601,7 @@ object Downloader {
         } catch (e: Throwable) {
             BifrostLogger.download.error("onFetch FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
             model.endJob(
-                MR.strings.firmwareCheckError(
+                Res.string.firmwareCheckError(
                     e.message ?: "Unknown error",
                     "",
                 )

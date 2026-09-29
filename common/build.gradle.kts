@@ -12,7 +12,6 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform.android.library)
     alias(libs.plugins.kotlin.native.cocoapods)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.moko.resources)
 }
 
 
@@ -42,6 +41,7 @@ kotlin {
         }
         it.binaries {
             framework {
+                baseName = "common"
                 isStatic = true
                 binaryOption("bundleVersion", versionCode.toString())
                 binaryOption(
@@ -81,7 +81,6 @@ kotlin {
 
 //        sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
 //        sourceSets["main"].res.srcDirs("src/androidMain/res")
-//        sourceSets["main"].res.srcDir(layout.buildDirectory.file("generated/moko/androidMain/res"))
     }
 
     jvm {
@@ -108,34 +107,13 @@ kotlin {
         freeCompilerArgs.addAll("-Xexpect-actual-classes", "-Xdont-warn-on-error-suppression")
     }
 
-    cocoapods {
-        version = versionCode.toString()
-        summary = "Bifrost"
-        homepage = "https://zwander.dev"
-        ios.deploymentTarget = "14.0"
-        osx.deploymentTarget = "10.13"
-        podfile = project.file("../iosApp/Podfile")
-        framework {
-            baseName = "common"
-            isStatic = true
-            export(libs.moko.resources)
-            export(libs.nsexceptionKt.core)
-
-            binaryOption("bundleVersion", versionCode.toString())
-            binaryOption(
-                "bundleShortVersionString",
-                versionName,
-            )
-            binaryOption("bundleId", packageName)
-        }
-    }
-
     sourceSets {
         commonMain {
             dependencies {
                 api(libs.compose.constraintlayout)
                 api(libs.compose.foundation)
                 api(libs.compose.material3)
+                api(libs.compose.resources)
                 api(libs.compose.runtime)
                 api(libs.compose.ui)
                 api(libs.material.icons.core)
@@ -149,8 +127,6 @@ kotlin {
                 api(libs.ktor.client.auth)
                 api(libs.ktor.client.core)
                 api(libs.ktor.client.cio)
-                api(libs.moko.resources)
-                api(libs.moko.resources.compose)
                 api(libs.multiplatformSettings)
                 api(libs.multiplatformSettings.noArg)
                 api(libs.richeditor.compose)
@@ -253,18 +229,10 @@ kotlin {
         }
         iosArm64Main {
             dependsOn(iosMain)
-            resources.srcDirs("build/generated/moko/iosArm64Main/src")
         }
         iosSimulatorArm64Main {
             dependsOn(iosMain)
-            resources.srcDirs("build/generated/moko/iosSimulatorArm64Main/src")
         }
-    }
-}
-
-androidComponents {
-    onVariants { variant ->
-        variant.sources.res?.addStaticSourceDirectory("generated/moko/androidMain/res")
     }
 }
 
@@ -282,12 +250,14 @@ buildkonfig {
     }
 }
 
-multiplatformResources {
-    resourcesPackage.set("tk.zwander.samloaderkotlin.resources")
-}
-
 tasks.withType<Copy> {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+compose {
+    resources {
+        publicResClass = true
+    }
 }
 
 dependencies {

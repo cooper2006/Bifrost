@@ -3,6 +3,11 @@ package tk.zwander.common.tools.delegates
 import tk.zwander.common.util.BifrostLogger
 import io.ktor.utils.io.core.toByteArray
 import tk.zwander.common.data.DecryptFileInfo
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.decryptError
+import tk.zwander.common.generated.resources.decrypting
+import tk.zwander.common.generated.resources.done
+import tk.zwander.common.generated.resources.selectEncrypted
 import tk.zwander.common.tools.CryptUtils
 import tk.zwander.common.tools.Request
 import tk.zwander.common.util.Event
@@ -10,14 +15,13 @@ import tk.zwander.common.util.FileManager
 import tk.zwander.common.util.eventManager
 import tk.zwander.common.util.invoke
 import tk.zwander.commonCompose.model.DecryptModel
-import tk.zwander.samloaderkotlin.resources.MR
 
 object Decrypter {
     suspend fun onDecrypt(model: DecryptModel) {
         eventManager.sendEvent(Event.Decrypt.Start)
         val info = model.fileToDecrypt.value ?: run {
             BifrostLogger.decrypt.info("onDecrypt: no file selected, aborting")
-            model.endJob(MR.strings.selectEncrypted())
+            model.endJob(Res.string.selectEncrypted())
             eventManager.sendEvent(Event.Decrypt.Finish)
             return
         }
@@ -62,7 +66,7 @@ object Decrypter {
                         if (binaryFileInfo != null) {
                             binaryFileInfo.v4Key?.keyBytes ?: run {
                                 BifrostLogger.decrypt.info("onDecrypt: v4Key missing from binary info")
-                                model.endJob(MR.strings.decryptError("无法获取解密密钥，请检查型号和区域是否正确。"))
+                                model.endJob(Res.string.decryptError("无法获取解密密钥，请检查型号和区域是否正确。"))
                                 eventManager.sendEvent(Event.Decrypt.Finish)
                                 return
                             }
@@ -71,7 +75,7 @@ object Decrypter {
                         }
                     } catch (e: Throwable) {
                         BifrostLogger.decrypt.error("Unable to retrieve v4 key ${e.message}.")
-                        model.endJob(MR.strings.decryptError(e.message.toString()))
+                        model.endJob(Res.string.decryptError(e.message.toString()))
                         return
                     }
                 }
@@ -81,7 +85,7 @@ object Decrypter {
                 inputFile.openInputStream() ?: return
             } catch (e: Throwable) {
                 BifrostLogger.decrypt.error("Unable to open input file ${e.message}.")
-                model.endJob(MR.strings.decryptError(e.message.toString()))
+                model.endJob(Res.string.decryptError(e.message.toString()))
                 return
             }
 
@@ -89,7 +93,7 @@ object Decrypter {
                 outputFile.openOutputStream() ?: return
             } catch (e: Throwable) {
                 BifrostLogger.decrypt.error("Unable to open output file ${e.message}.")
-                model.endJob(MR.strings.decryptError(e.message.toString()))
+                model.endJob(Res.string.decryptError(e.message.toString()))
                 return
             }
 
@@ -101,14 +105,14 @@ object Decrypter {
             ) { current, max, bps ->
                 model.progress.value = current to max
                 model.speed.value = bps
-                eventManager.sendEvent(Event.Decrypt.Progress(MR.strings.decrypting(), current, max))
+                eventManager.sendEvent(Event.Decrypt.Progress(Res.string.decrypting(), current, max))
             }
 
             eventManager.sendEvent(Event.Decrypt.Finish)
-            model.endJob(MR.strings.done())
+            model.endJob(Res.string.done())
         } catch (e: Throwable) {
             eventManager.sendEvent(Event.Decrypt.Finish)
-            model.endJob(MR.strings.decryptError((e.message).toString()))
+            model.endJob(Res.string.decryptError((e.message).toString()))
         }
     }
 
@@ -125,11 +129,11 @@ object Decrypter {
         handleFileInput(model, info)
     }
 
-    fun handleFileInput(model: DecryptModel, info: DecryptFileInfo?) {
+    suspend fun handleFileInput(model: DecryptModel, info: DecryptFileInfo?) {
         if (info != null) {
             if (!info.encFile.getName().endsWith(".enc2") &&
                 !info.encFile.getName().endsWith(".enc4")) {
-                model.endJob(MR.strings.selectEncrypted())
+                model.endJob(Res.string.selectEncrypted())
             } else {
                 model.endJob("")
                 model.fileToDecrypt.value = info

@@ -1,5 +1,5 @@
-extra["versionCode"] = 94
-extra["versionName"] = "2.2.0"
+extra["versionCode"] = 96
+extra["versionName"] = "2.2.1"
 
 extra["compileSdk"] = 37
 extra["targetSdk"] = 36
@@ -27,7 +27,6 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform.android.library) apply false
     alias(libs.plugins.kotlin.native.cocoapods) apply false
     alias(libs.plugins.kotlin.serialization) apply false
-    alias(libs.plugins.moko.resources) apply false
     alias(libs.plugins.compose.hot.reload) apply false
 }
 

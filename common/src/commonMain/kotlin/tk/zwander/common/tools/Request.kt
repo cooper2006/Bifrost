@@ -17,6 +17,13 @@ import tk.zwander.common.data.exception.VersionException
 import tk.zwander.common.data.exception.VersionMismatchException
 import tk.zwander.common.exceptions.DownloadError
 import tk.zwander.common.exceptions.NoBinaryFileError
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.badReturnStatus
+import tk.zwander.common.generated.resources.error
+import tk.zwander.common.generated.resources.invalidFirmwareError
+import tk.zwander.common.generated.resources.invalid_imei_or_serial
+import tk.zwander.common.generated.resources.versionCheckError
+import tk.zwander.common.generated.resources.versionMismatch
 import tk.zwander.common.util.CrossPlatformBugsnag
 import tk.zwander.common.util.dataNode
 import tk.zwander.common.util.firstDataElementDataByTagName
@@ -24,9 +31,7 @@ import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.invoke
 import tk.zwander.common.util.isAccessoryModel
 import tk.zwander.common.util.textNode
-import tk.zwander.samloaderkotlin.resources.MR
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.ExperimentalTime
 
 /**
  * Handle some requests to Samsung's servers.
@@ -221,22 +226,27 @@ object Request {
         legacy: Boolean,
     ): String {
         val logicCheck = run {
-            // 防御性检查：文件名至少需要 25 个字符才能提取中间段
-            // 正常三星固件文件名（如 SM-G970F_8_WWW_XXXX_XXXX.zip.enc2）远长于此
-            if (fileName.length >= 25) {
-                val special = fileName.slice(fileName.length - 25 until fileName.length - 9)
-                getLogicCheck(special, nonce)
+            val special = if (legacy) {
+                fileName.split(".").first().run { slice(this.length - (16 % this.length)..this.lastIndex) }
+            } else if (fileName.length >= 25) {
+                // 防御性检查：文件名至少需要 25 个字符才能提取中间段
+                // 正常三星固件文件名（如 SM-G970F_8_WWW_XXXX_XXXX.zip.enc2）远长于此
+                fileName.slice(fileName.length - 25 until fileName.length - 9)
             } else {
                 BifrostLogger.download.info("createBinaryInit: fileName too short for logic check (len=${fileName.length}), using empty")
                 ""
             }
+            getLogicCheck(special, nonce)
         }
 
         val xml = xml("FUSMsg") {
             "FUSHdr" {
-                textNode("ProtoVer", "1")
-                textNode("SessionID", "0")
-                textNode("MsgID", "1")
+                textNode("ProtoVer", if (legacy) "1.0" else "1")
+
+                if (!legacy) {
+                    textNode("SessionID", "0")
+                    textNode("MsgID", "1")
+                }
             }
             "FUSBody" {
                 "Put" {
@@ -278,7 +288,7 @@ object Request {
             return null
         } else if (error != null) {
             BifrostLogger.download.info("retrieveBinaryFileInfo: error -> ${error.message}")
-            onErrorFinish("${error.message ?: MR.strings.error()}\n\n${output}")
+            onErrorFinish("${error.message ?: Res.string.error()}\n\n${output}")
             if (result.isReportableCode() &&
                 !output.contains("Incapsula") &&
                 error !is CancellationException &&
@@ -299,7 +309,6 @@ object Request {
      * @param region the device region.
      * @return a BinaryFileInfo instance representing the file.
      */
-    @OptIn(ExperimentalTime::class)
     private suspend fun getBinaryFile(
         fw: String,
         model: String,
@@ -344,7 +353,7 @@ object Request {
             if (status == "F01") {
                 BifrostLogger.download.info("getBinaryFile: invalid firmware (F01)")
                 return FetchResult.GetBinaryFileResult(
-                    error = Exception(MR.strings.invalidFirmwareError()),
+                    error = Exception(Res.string.invalidFirmwareError()),
                     rawOutput = responseXml.toString(),
                     requestBody = request,
                     responseCode = status,
@@ -354,7 +363,7 @@ object Request {
             if (status == "408") {
                 BifrostLogger.download.info("getBinaryFile: invalid IMEI/serial (408)")
                 return FetchResult.GetBinaryFileResult(
-                    error = Exception(MR.strings.invalid_imei_or_serial()),
+                    error = Exception(Res.string.invalid_imei_or_serial()),
                     rawOutput = responseXml.toString(),
                     requestBody = request,
                     responseCode = status,
@@ -364,7 +373,7 @@ object Request {
             if (status != "200" && status != "S00") {
                 BifrostLogger.download.info("getBinaryFile: bad status=$status")
                 return FetchResult.GetBinaryFileResult(
-                    error = Exception(MR.strings.badReturnStatus(status.toString())),
+                    error = Exception(Res.string.badReturnStatus(status.toString())),
                     rawOutput = responseXml.toString(),
                     requestBody = request,
                     responseCode = status,
@@ -440,7 +449,7 @@ object Request {
 
                 val v4Key = try {
                     responseXml.extractV4Key()
-                        ?: CryptUtils.getV4Key(fw, model, region, imeiSerial)
+                        ?: CryptUtils.getV4Key(fw, model, region, imeiSerial, legacy = legacy)
                 } catch (e: Exception) {
                     BifrostLogger.download.warn("V4 key extraction failed: ${e.message}")
                     null
@@ -495,7 +504,7 @@ object Request {
                 BifrostLogger.download.info("getBinaryFile: no dataFile, returning info with VersionCheckException")
                 return FetchResult.GetBinaryFileResult(
                     info = generateInfo(),
-                    error = VersionCheckException(MR.strings.versionCheckError()),
+                    error = VersionCheckException(Res.string.versionCheckError()),
                     requestBody = request,
                     responseCode = status,
                 )
@@ -573,7 +582,7 @@ object Request {
                     BifrostLogger.download.info("getBinaryFile: version mismatch! requested=$fw, served=$served, cscMatch=$cscMatch, cpMatch=$cpMatch, fwVerMatch=$fwVersionMatch, pdaMatch=$fwPdaMatch")
                     return FetchResult.GetBinaryFileResult(
                         info = generateInfo(),
-                        error = VersionMismatchException(MR.strings.versionMismatch(fw, served)),
+                        error = VersionMismatchException(Res.string.versionMismatch(fw, served)),
                         requestBody = request,
                         responseCode = status,
                     )

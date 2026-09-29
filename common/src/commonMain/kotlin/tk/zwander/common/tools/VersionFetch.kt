@@ -10,6 +10,9 @@ import org.redundent.kotlin.xml.PrintOptions
 import org.redundent.kotlin.xml.xml
 import tk.zwander.common.data.FetchResult
 import tk.zwander.common.data.SmartBinaryInfo
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.invalidCscError
+import tk.zwander.common.generated.resources.noFirmwareFoundError
 import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.dataNode
 import tk.zwander.common.util.firstDataElementDataByTagName
@@ -17,7 +20,6 @@ import tk.zwander.common.util.globalHttpClient
 import tk.zwander.common.util.firstElementByTagName
 import tk.zwander.common.util.invoke
 import tk.zwander.common.util.textNode
-import tk.zwander.samloaderkotlin.resources.MR
 
 /**
  * Handle fetching the latest version for a given model and region.
@@ -88,9 +90,9 @@ object VersionFetch {
                     return FetchResult.VersionFetchResult(
                         error = Exception(
                             if (hasAccessDenied) {
-                                MR.strings.invalidCscError()
+                                Res.string.invalidCscError()
                             } else {
-                                MR.strings.noFirmwareFoundError()
+                                Res.string.noFirmwareFoundError()
                             },
                         ),
                     )

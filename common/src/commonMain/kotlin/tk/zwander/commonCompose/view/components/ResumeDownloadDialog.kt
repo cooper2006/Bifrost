@@ -11,10 +11,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.icerock.moko.resources.compose.stringResource
 import dev.zwander.compose.alertdialog.InWindowAlertDialog
+import org.jetbrains.compose.resources.stringResource
 import tk.zwander.common.data.DownloadState
-import tk.zwander.samloaderkotlin.resources.MR
+import tk.zwander.common.generated.resources.Res
+import tk.zwander.common.generated.resources.resume
+import tk.zwander.common.generated.resources.resumeDownloadItem
+import tk.zwander.common.generated.resources.resumeDownloadMessage
+import tk.zwander.common.generated.resources.resumeDownloadTitle
+import tk.zwander.common.generated.resources.skipAll
 
 @Composable
 fun ResumeDownloadDialog(
@@ -29,7 +34,7 @@ fun ResumeDownloadDialog(
         modifier = modifier,
         showing = showing,
         title = {
-            Text(text = stringResource(MR.strings.resumeDownloadTitle))
+            Text(text = stringResource(Res.string.resumeDownloadTitle))
         },
         text = {
             Column(
@@ -37,7 +42,7 @@ fun ResumeDownloadDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = stringResource(MR.strings.resumeDownloadMessage, incompleteDownloads.size),
+                    text = stringResource(Res.string.resumeDownloadMessage, incompleteDownloads.size),
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
@@ -63,7 +68,7 @@ fun ResumeDownloadDialog(
 
                                     Text(
                                         text = stringResource(
-                                            MR.strings.resumeDownloadItem,
+                                            Res.string.resumeDownloadItem,
                                             state.fileName,
                                             state.chunks.count { it.status == tk.zwander.common.data.ChunkStatus.COMPLETED },
                                             state.chunks.size,
@@ -88,7 +93,7 @@ fun ResumeDownloadDialog(
             TextButton(
                 onClick = onDismissRequest,
             ) {
-                Text(text = stringResource(MR.strings.skipAll))
+                Text(text = stringResource(Res.string.skipAll))
             }
 
             TextButton(
@@ -96,7 +101,7 @@ fun ResumeDownloadDialog(
                 enabled = incompleteDownloads.isNotEmpty(),
             ) {
                 Text(
-                    text = stringResource(MR.strings.resume),
+                    text = stringResource(Res.string.resume),
                     color = MaterialTheme.colorScheme.primary,
                 )
             }

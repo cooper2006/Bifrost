@@ -4,8 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.harawata.appdirs.AppDirsFactory
 import tk.zwander.common.GradleConfig
+import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.RandomAccessStream
-import tk.zwander.samloaderkotlin.resources.MR
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -20,9 +20,11 @@ actual object AuthParamsHandler {
     }
 
     actual suspend fun extractFile() {
+        tempFile.delete()
         tempFile.createNewFile()
         withContext(Dispatchers.IO) {
-            MR.files.auth_param_dat.resourcesClassLoader.getResourceAsStream(MR.files.auth_param_dat.filePath)?.use { input ->
+            this::class.java.classLoader.getResourceAsStream("files/auth_param.dat")?.use { input ->
+                BifrostLogger.general.debug("AuthParamsHandler: extracting files/auth_param.dat to ${tempFile.absolutePath}")
                 tempFile.outputStream().use { output ->
                     input.copyTo(output)
                 }

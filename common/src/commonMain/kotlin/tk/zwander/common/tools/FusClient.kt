@@ -223,7 +223,11 @@ object FusClient : IFusClient<FusClient.Request> {
         val body = response.bodyAsText()
         BifrostLogger.download.info("makeReq: body length=${body.length}, snippet=${body.take(120).replace("\n", " ")}")
 
-        if (request != Request.GENERATE_NONCE && response.is401(body)) {
+        if (request == Request.GENERATE_NONCE) {
+            // auth_params 在启动时会被删除，只有 nonce 请求才会重新提取，
+            // 因此必须在下面签名之前完成提取。上游行为一致。
+            AuthParamsHandler.extractFile()
+        } else if (response.is401(body)) {
             BifrostLogger.download.info("makeReq: got 401, regenerating nonce")
             generateNonceInternal()
             throw RuntimeException("认证持续失败（重试后仍为 401）")

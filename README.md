@@ -23,7 +23,13 @@ Bifrost 使用 Jetpack Compose、JetBrains Compose for Desktop 和 Kotlin Multip
 
 也可以在 [Releases 页面](https://github.com/zacharee/SamloaderKotlin/releases) 获取二进制文件。
 
-如果你想运行于 iOS 或在 macOS 上使用 iOS 版本，可以[在此](https://testflight.apple.com/join/PVmWZNZn)报名 TestFlight 版本。
+在 macOS 和 Linux 上，还可以通过 [Homebrew](https://brew.sh/) 安装：
+
+```bash
+brew install --cask bifrost
+```
+
+如果你想运行于 iOS 或在 macOS 上使用 iOS 版本，可以[在此](https://testflight.apple.com/join/PVmWZNZn)报名 TestFlight 版本。注意该版本的更新频率可能低于其他平台。
 
 ## 平台兼容性
 
@@ -108,6 +114,33 @@ Bifrost（本应用）不包含恶意软件。你可以通过浏览源代码或�
 ## 准备：
 1. 确保已安装最新的 [Android Studio Canary](https://developer.android.com/studio/preview)。
 2. 将本项目克隆到 Android Studio 中并让其导入。
+
+### 工具链要求
+
+| 组件 | 版本/说明 |
+|------|-----------|
+| JDK | 21 |
+| Gradle | 9.7.1（通过 wrapper 自动下载，默认使用腾讯云镜像加速） |
+| Android SDK | 需要 `compileSdk 37` 平台与 build-tools |
+| Kotlin | 多平台（Android / JVM 桌面 / iOS） |
+
+资源系统使用 **Compose Multiplatform Resources**：
+
+- 资源文件位于 `common/src/commonMain/composeResources/`（`drawable/`、`files/`、`values*/`）
+- 代码中通过 `Res.string.x` / `Res.drawable.x` / `Res.readBytes("files/x")` 访问
+- 新增字符串需同时更新 `common/src/commonMain/composeResources/values/strings.xml` 与 `values-zh-rCN/strings.xml`
+
+iOS 集成使用 **Swift Package Manager**（已移除 CocoaPods），构建前请确认 `iosApp/iosApp.xcworkspace` 可直接解析依赖。
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [`docs/download-guide.md`](docs/download-guide.md) | 下载与安装指南 |
+| [`docs/download-process.md`](docs/download-process.md) | 固件下载流程、错误处理与问题修复对照 |
+| [`docs/upstream-merge.md`](docs/upstream-merge.md) | 上游合并策略、冲突处理与验证记录 |
+| [`架构改进设计文档.md`](架构改进设计文档.md) | 下载状态机、JobManager、资源体系迁移等架构说明 |
+| [`SEQUENCE_DIAGRAM.md`](SEQUENCE_DIAGRAM.md) | 下载流程时序图 |
 
 ## 桌面端
 

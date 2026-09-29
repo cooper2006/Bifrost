@@ -110,3 +110,16 @@ UI (DownloadView)    DownloadModel         Downloader              Request      
 - **authMutex 不保护下载过程本身**（大文件下载不应阻塞其他请求）。`downloadFile` 方法在开始时读取一次 auth 快照（通过 `getAuthV(cloud=true)` 在锁外获取），之后不再依赖 Mutex。
 - **`retryWithBackoff` 需要显式泛型参数**，因为 Kotlin 编译器无法推断 Unit 类型的 T。JVM 上的签名冲突已通过移除 Unit 重载解决，调用示例：`retryWithBackoff<String?>(...)`。
 - **`makeReq` 使用 `retryWithBackoff<String>`**，内部持有 authMutex 通过 `makeReqWithRetryCheck` 调用，确保重试期间状态一致。
+- **`v2.2.1` 起**：`makeReqInternal` 在 `request == Request.GENERATE_NONCE` 分支中调用 `AuthParamsHandler.extractFile()`，确保 `auth_param.dat` 在签名前就绪（与上游行为一致）。
+
+---
+
+## v2.2.1（上游合并）对时序的影响
+
+| 节点 | 变化 |
+|------|------|
+| `FusClient.makeReq(GENERATE_NONCE)` | 响应处理后调用 `AuthParamsHandler.extractFile()` 重新提取 `auth_param.dat` |
+| 资源访问 | 字符串/图标/TAC 数据改由 Compose Resources 提供（`Res.string` / `Res.drawable` / `Res.readBytes`），不改变下载时序 |
+| legacy BinaryInit | `Request.createBinaryInit(legacy = true)` 的 `logicCheck` 采用上游计算方式（`.` 前段 + `16 % length` 偏移） |
+| 下载引擎 | 仍为 Ktor 单线程流式（64KB buffer + HTTP Range 续传），Ketch 默认实现未启用 |
+| 401 恢复 | 保持 Nonce 刷新 + BinaryInit 重放（最多 10 次），未启用上游的标准→legacy 自动回退 |

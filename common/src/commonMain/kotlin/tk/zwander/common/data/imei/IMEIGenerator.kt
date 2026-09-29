@@ -16,10 +16,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import tk.zwander.common.generated.resources.Res
 import tk.zwander.common.util.BifrostLogger
 import tk.zwander.common.util.globalHttpClient
-import tk.zwander.common.util.invoke
-import tk.zwander.samloaderkotlin.resources.MR
 
 data object IMEIGenerator {
     fun makeImeisForTacs(
@@ -101,7 +100,7 @@ data object IMEIDatabase {
         "020202",
     )
     private const val LIVE_ENDPOINT =
-        "https://raw.githubusercontent.com/zacharee/SamloaderKotlin/master/common/src/commonMain/moko-resources/files/tacs.csv"
+        "https://raw.githubusercontent.com/zacharee/SamloaderKotlin/master/common/src/commonMain/composeResources/files/tacs.csv"
 
     val tacs = MutableStateFlow<Map<String, Set<String>>>(mapOf())
     private val imeiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -144,12 +143,11 @@ data object IMEIDatabase {
         return beforeSpaces.slice(0 until firstSlash)
     }
 
-    private fun loadLocalCsv() {
-        val csvData = MR.files.tacs_csv()?.decodeToString()
-        if (csvData != null) {
-            loadCsv(csvData)
-        } else {
-            BifrostLogger.general.warn("loadLocalCsv: tacs_csv resource not found")
+    private suspend fun loadLocalCsv() {
+        try {
+            loadCsv(Res.readBytes("files/tacs.csv").decodeToString())
+        } catch (e: Exception) {
+            BifrostLogger.general.warn("loadLocalCsv: tacs.csv resource not found: ${e.message}")
         }
     }
 

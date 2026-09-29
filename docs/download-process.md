@@ -796,13 +796,14 @@ sequenceDiagram
 | `VersionFetch.kt` 非空断言 NPE | `BINARY_SEQUENCE.toInt()!!` 改为 `toIntOrNull() ?: 0` | v2.1.3+ |
 | `FileManager.jvm.kt` 临时目录 NPE | `parentFile!!` 改为安全调用，失败返回 null | v2.1.3+ |
 | `UrlHandler.ios.kt` URL 空指针 | `NSURL.URLWithString(url)!!` 改为安全调用 + 日志警告 | v2.1.3+ |
-| `IMEIGenerator.kt` 资源加载 NPE | `MR.files.tacs_csv()!!` 改为安全调用 + 日志警告 | v2.1.3+ |
+| `IMEIGenerator.kt` 资源加载 NPE | `Res.readBytes("files/tacs.csv")` 调用改为 try/catch + 日志警告 | v2.1.3+ |
 | `Request.kt` 索引越界 | `dataIndex!!` 改为空安全 + 越界判断，无效时降级到首元素 | v2.1.3+ |
 
 ## 代码变更记录
 
 | Commit | 日期 | 内容 |
 |--------|------|------|
+| (当前) | 2026-09-29 | 合并上游 master（26 提交）：Compose Resources 迁移、iOS Swift Package Manager、`libs/` 本地 Maven 仓库、依赖升级（ktor 3.6.0 / Gradle 9.7.1）；zh-rCN 翻译迁移；IMEIGenerator TAC 端点修正；FusClient 重新提取 auth_params |
 | `7096cead` | 2026-07-29 | 架构改进 Phase 3：单元测试（4 文件 117 测试）、retryWithBackoff 编译修复、DownloadStateMachine/JobManager 文档更新 |
 | (当前) | 2026-07-28 ~ 29 | 架构改进 Phase 1~2：DownloadStateMachine、阶段方法拆分、JobManager/BaseModel 分离、authMutex 线程安全、retryWithBackoff 统一重试 |
 | (当前) | 2026-07-28 | 第四轮代码审查：GlobalScope 消除（3 文件）、e.printStackTrace() 全替换（18 处）、!! NPE 防御性修复（7 处） |
@@ -850,3 +851,39 @@ sequenceDiagram
 | 解密失败 | 抛出异常，显示错误信息 | `Downloader.kt` `phaseDecrypt()` |
 | 用户取消下载 | 清理临时文件（成功/取消路径） | `DownloadView.kt` / `DownloadModel.kt` |
 | 下载失败（重试用尽） | 保留已下载部分以便下次续传 | `DownloadModel.onEnd()` |
+
+---
+
+## 上游合并（v2.2.1）对下载流程的影响
+
+| 变更点 | 说明 |
+|--------|------|
+| 资源系统 | moko-resources → Compose Resources（`Res.string` / `Res.drawable` / `Res.readBytes`），详见 `docs/upstream-merge.md` |
+| 认证 | `FusClient.makeReqInternal()` 在 `GENERATE_NONCE` 分支调用 `AuthParamsHandler.extractFile()`，确保签名使用最新 auth_params |
+| legacy BinaryInit | `Request.createBinaryInit()` 采纳上游 legacy 文件名 `logicCheck` 计算方式（`.` 前段 + `16 % length` 偏移），保留文件名长度防御检查 |
+| 下载引擎 | 仍为本 fork 的 Ktor 单线程流式实现（`FusClient.downloadFile()`）；Ketch 默认实现未启用 |
+| 401 处理 | 保留本地 Nonce 刷新 + BinaryInit 重试（`retryWithBackoff<String?>`，最多 10 次）；未启用上游的标准→legacy 自动回退 |
+| 版本查询 | `VersionFetch` 保留 `Kies2.0_FUS` 用户代理与 60s/30s/15s 超时（上游为 `Kiss2.0_FUS` 且无超时） |
+
+### 资源引用一致性检查
+
+合并上游或新增资源后，可用以下脚本校验所有 `Res.*` 引用都能解析：
+
+```bash
+python3 - << 'EOF'
+import re, os, glob, collections
+strings = 'common/src/commonMain/composeResources/values/strings.xml'
+defined = set(re.findall(r'<string name="([^"]+)"', open(strings, encoding='utf-8').read()))
+drawables = {os.path.splitext(os.path.basename(p))[0] for p in glob.glob('common/src/commonMain/composeResources/drawable/*')}
+used_s, used_d = collections.defaultdict(set), collections.defaultdict(set)
+for root, _, files in os.walk('.'):
+    if '/.git' in root or '/build' in root: continue
+    for f in files:
+        if f.endswith('.kt'):
+            p = os.path.join(root, f); t = open(p, encoding='utf-8', errors='ignore').read()
+            for m in re.finditer(r'Res\.string\.([A-Za-z_][A-Za-z0-9_]*)', t): used_s[m.group(1)].add(p)
+            for m in re.finditer(r'Res\.drawable\.([A-Za-z_][A-Za-z0-9_]*)', t): used_d[m.group(1)].add(p)
+print('missing strings:', sorted(set(used_s) - defined))
+print('missing drawables:', sorted(set(used_d) - drawables))
+EOF
+```

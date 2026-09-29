@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+## [2.2.1] - 2026-09-29
+
+### Added
+- **合并上游 `zacharee/Bifrost` master（26 个提交，自 2.1.4 起）**：引入 Compose Resources 资源体系、iOS Swift Package Manager 集成、自定义 Ketch 库本地 Maven 仓库、上游下载流程修复与 TAC/Crowdin 更新
+- **`docs/upstream-merge.md`**：记录本次上游合并的策略、冲突处理原则与未采纳项，便于后续跟进上游
+- **zh-rCN 完整中文翻译迁移到 Compose Resources**：将原 moko-resources 的 131 条中文翻译注入 `composeResources/values-zh-rCN/strings.xml`
+- **本地新增字符串进入 Compose Resources**：`pause`/`paused`/`resume`/`copying`/`autoDecryptFirmware(Desc)`/`downloadMode(Desc)`/`resumeDownloadTitle`/`resumeDownloadMessage`/`resumeDownloadItem`/`skipAll` 共 12 个 key
+- FusClient 在 `GENERATE_NONCE` 请求后重新提取 `auth_params`（对齐上游行为，避免启动后首次签名使用过期密钥）
+
+### Changed
+- **资源系统迁移：moko-resources → Compose Resources**。全代码库 `MR.strings.x` / `MR.images.x` / `MR.files.x` 替换为 `Res.string.x` / `Res.drawable.x` / `Res.readBytes("files/x")`，删除 `moko-resources` 目录与三个平台的 `ResourceUtils` actual 实现，移除 moko Gradle 插件与依赖
+- **iOS 集成从 CocoaPods 迁移到 Swift Package Manager**：删除 `common/common.podspec`、`iosApp/Podfile`、`iosApp/Podfile.lock` 与 `common/build.gradle.kts` 中的 `cocoapods {}` 配置块
+- **引入本地 Maven 仓库 `libs/`**：`settings.gradle.kts` 中启用 `maven(libs)` 以解析上游自编译的 Ketch 构件
+- Gradle wrapper 升级到 **9.7.1**（继续使用腾讯云镜像加速）
+- 依赖升级：ktor 3.6.0、nsexception-kt 1.1.0、oshi 7.6.1、richeditor-compose 1.2.0、slf4j 2.0.20
+- `gradle.properties` 中本机 `org.gradle.java.home` 改为注释形式（避免硬编码路径影响其他环境），并修正为 ServBay 当前 JDK 路径
+- 保留本地自研实现：Ktor 单线程流式下载、下载状态机（`DownloadPhase`/`DownloadStateMachine`）、阶段化 `Downloader`、`ParallelDownloader`、`BifrostLogger` 日志体系、`authMutex` 线程安全与统一超时
+
+### Fixed
+- **`IMEIGenerator` 远程 TAC 端点失效**：`LIVE_ENDPOINT` 路径由 `moko-resources/files/tacs.csv` 更正为 `composeResources/files/tacs.csv`
+- **`IMEIGenerator.loadLocalCsv()` 资源异常**：改用 `Res.readBytes("files/tacs.csv")` 并保留异常兜底日志
+- **`Request.createBinaryInit` legacy 分支**：采纳上游 legacy 文件名 `logicCheck` 计算方式，同时保留本地文件名长度防御性检查
+- **`VersionFetch` 用户代理**：保留已验证的 `Kies2.0_FUS`（上游误改为 `Kiss2.0_FUS`）与 60s/30s/15s 超时配置
+
 ## [2.2.0] - 2026-07-29
 
 ### Added

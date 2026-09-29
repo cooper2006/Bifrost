@@ -23,8 +23,6 @@ import tk.zwander.common.util.RandomAccessStream
 import tk.zwander.common.util.streamOperationWithProgress
 import tk.zwander.common.util.trackOperationProgress
 import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
-import kotlin.math.max
 
 /**
  * Handle encryption and decryption stuff.
@@ -145,7 +143,6 @@ object CryptUtils {
          * @param nonce the nonce seed.
          * @return an auth token based on the nonce.
          */
-        @OptIn(ExperimentalEncodingApi::class)
         fun getAuth(nonce: String): String {
             val keyData = nonce.map { (it.code % 16).toByte() }.toByteArray()
             val fKey = getFKey(keyData)
@@ -158,7 +155,6 @@ object CryptUtils {
          * @param input the nonce to decrypt.
          * @return the decrypted nonce.
          */
-        @OptIn(ExperimentalEncodingApi::class)
         fun decryptNonce(input: String): String {
             val d = Base64.decode(input)
             return aesDecrypt(d, KEY_1.toByteArray())
@@ -292,7 +288,6 @@ object CryptUtils {
      * @param input the nonce to decrypt.
      * @return the decrypted nonce.
      */
-    @OptIn(ExperimentalEncodingApi::class)
     suspend fun decryptNonce(input: String): String {
         return authenticateBlock(input.toByteArray()).toHexString()
     }

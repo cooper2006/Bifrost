@@ -14,7 +14,7 @@ plugins {
 group = rootProject.extra["groupName"].toString()
 version = rootProject.extra["versionName"].toString()
 
-val javaVersionEnum: JavaVersion by rootProject.extra
+val javaVersionEnum: JavaVersion = rootProject.extra["javaVersionEnum"] as JavaVersion
 
 kotlin {
     jvm {
@@ -28,7 +28,7 @@ kotlin {
     }
 
     sourceSets {
-        val jvmMain by getting {
+        val jvmMain = getByName("jvmMain") {
             dependencies {
                 implementation(project(":common"))
 
@@ -71,8 +71,8 @@ tasks.withType<ComposeHotRun>().configureEach {
 }
 
 compose.desktop {
-    val packageName: String by rootProject.extra
-    val appName: String by rootProject.extra
+    val packageName: String = rootProject.extra["packageName"].toString()
+    val appName: String = rootProject.extra["appName"].toString()
 
     val localProperties = Properties()
     val localPropertiesFile = rootProject.file("local.properties")

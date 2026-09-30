@@ -121,3 +121,27 @@ git diff --name-only --diff-filter=U      # 应为空
 git push origin HEAD:master
 ```
 
+---
+
+## 上游分支跟踪：2026-09-30 复查
+
+例行复查上游全部分支，确认除 `master` 外没有需要纳入的内容（`git fetch upstream '+refs/heads/*:refs/remotes/upstream/*'`）。
+
+| 上游分支 | HEAD | 最后提交 | 落后 master | 领先 master | 资源体系 | 结论 |
+|----------|------|----------|-------------|-------------|----------|------|
+| `master` | `ed73a034` | 2026-09-26 | 0 | 0 | Compose Resources | **已完整合并**，无需动作 |
+| `l10n_master` | `bdc0abbd` | 2023-11-11 | 1360 | 371 | 旧 moko 布局（`strings_zh_CN.properties`） | 不合并：3 年前的 Crowdin 翻译快照，仍是 moko-resources 格式，合并会回退资源迁移 |
+| `weblate-i18n` | `ee81e271` | 2025-01-09 | 255 | 2 | `moko-resources/{fr,ta}` | 不合并：仅 2 个提交且基于 moko-resources，master 已有更新的 Crowdin 翻译 |
+| `new_method` | `288b2bd9` | 2026-03-09 | 70 | 9 | `moko-resources` | 不合并：实验分支（Android 改用 Ketch、`CryptUtils` 重构、移除 IMEI/序列号字段），属功能性变更，需单独立项实机评估 |
+| `test` | `b2d6c0d6` | 2026-02-16 | 90 | 1 | `moko-resources` | 不合并：临时提交（"Temp"） |
+| `jsoup-exp` | `16cabd75` | 2022-12-22 | 1292 | 7 | 无 | 不合并：2022 年的废弃实验（提交信息为 "Ugh"） |
+| `swiftsoup-port` | `2b237725` | 2022-08-26 | 1291 | 2 | 无 | 不合并：2022 年的废弃实验 |
+
+复查结论：
+
+- `git rev-list --count HEAD..upstream/master` = **0**，上游主分支代码已全部纳入 fork。
+- 本仓库 `moko-resources` 残留 = **0**，`composeResources` 语言目录 = **29** 个，资源迁移保持完整。
+- 除 `master` 外，上游所有分支要么早已废弃（2022~2025），要么是基于 moko-resources 时代的实验分支；合并它们会把资源体系回退到 moko，属于功能变更而非例行同步，需另行立项。
+
+> 复查频率：建议每次例行同步时执行一次该命令；只有当 `upstream/master` 出现新提交，或上游在 `new_method` 之类分支上正式合并功能时，才需要重新走完整合并流程。
+

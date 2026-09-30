@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Docs
+- **`docs/upstream-merge.md` 新增「上游分支跟踪：2026-09-30 复查」**：审计上游全部 7 个分支，确认 `upstream/master`（`ed73a034`）已完整合并（缺失 0 提交），其余分支（`l10n_master`、`weblate-i18n`、`new_method`、`test`、`jsoup-exp`、`swiftsoup-port`）均为陈旧或实验分支，合并会把资源体系回退到 moko-resources，故不纳入
+
 ## [2.2.1] - 2026-09-29
 
 ### Added
